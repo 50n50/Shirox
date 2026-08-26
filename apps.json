@@ -27,6 +27,15 @@
       },
       "versions": [
         {
+          "version": "1.0.4",
+          "buildVersion": "109",
+          "date": "2026-08-19",
+          "localizedDescription": "Rebuild of 1.0.3 submitted for TestFlight review.",
+          "downloadURL": "https://github.com/xibrox/Shirox/releases/download/beta/Shirox.ipa",
+          "size": 9355741,
+          "minOSVersion": "15.0"
+        },
+        {
           "version": "1.0.3",
           "buildVersion": "108",
           "date": "2026-07-15",
