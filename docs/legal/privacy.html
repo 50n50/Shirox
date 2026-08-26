@@ -87,22 +87,56 @@
 </head>
 <body>
   <main>
-    <p class="intro">Shirox is a free, source-available anime library manager for iOS. The app focuses on user control, community modules, and local-first library management.</p>
+    <p class="intro">Shirox is a free, source-available anime and manga library manager for iOS. It is built to be local-first: the app has no user accounts of its own, no analytics, and no servers operated by the Shirox project that receive your data.</p>
 
     <div class="group">
       <section>
-        <h2>No Shirox account</h2>
-        <p>Shirox itself does not run a hosted user account system, sell personal data, or operate a tracking profile for users of the app.</p>
+        <h2>What Shirox collects</h2>
+        <p>Nothing. The Shirox project does not operate a backend, does not run an account system, and does not receive, store, sell, or share any personal information about you. There is no analytics SDK, no advertising SDK, and no crash reporting in the app. No data is collected for tracking, and nothing is linked to your identity by us.</p>
       </section>
 
       <section>
-        <h2>Local data</h2>
-        <p>Library entries, playback progress, settings, and module configuration may be stored on your device so the app can provide its core features.</p>
+        <h2>Data stored on your device</h2>
+        <p>So the app can work, Shirox stores the following locally on your device only: your library entries and collections, watch and read progress, playback and reader settings, module configuration, search history, cached images and metadata, downloaded episodes and chapters, and sign-in tokens for any tracking service you connect. This information stays on the device and is not transmitted to the Shirox project.</p>
       </section>
 
       <section>
-        <h2>Third-party services</h2>
-        <p>Optional features such as AniList sync, community modules, external media sources, AirPlay, Chromecast, or support links can connect to services outside the Shirox project. Those services may process data under their own privacy terms.</p>
+        <h2>Services you choose to connect</h2>
+        <p>Shirox is a client for services that you decide to use. Nothing below is connected until you set it up:</p>
+        <p><strong>AniList and MyAnimeList.</strong> If you sign in, Shirox communicates directly with that service to read and update your lists, scores and progress, and to show profile and activity information. Your credentials are handled by that service's own sign-in page. Their handling of your data is governed by their privacy policies: anilist.co/terms and myanimelist.net/about/privacy_policy.</p>
+        <p><strong>Jellyfin.</strong> If you connect a Jellyfin server, Shirox talks to the server address you enter, which is yours or one you have chosen. Playback position is reported back to that server.</p>
+        <p><strong>AirPlay and Google Cast.</strong> If you cast, the media address and playback state are sent to the receiving device on your network. Google Cast is provided by Google and is subject to Google's privacy policy.</p>
+        <p><strong>User-added modules and media sources.</strong> If you install a content module, Shirox requests data from the addresses that module defines. Those hosts are not operated by the Shirox project, and their handling of any request is governed by their own terms. You choose which modules to install and can remove them at any time.</p>
+      </section>
+
+      <section>
+        <h2>Third-party protection</h2>
+        <p>The Shirox project does not share your data with any third party, because it never receives it. Data reaches an outside service only when you connect that service yourself, and it goes directly from your device to that service. Where a service is used to provide app functionality, that service is expected to provide protection of your data equal to the terms of this policy, and its own privacy policy governs what it does with data you send it.</p>
+      </section>
+
+      <section>
+        <h2>Notifications</h2>
+        <p>If you allow notifications, Shirox posts local notifications on your device to tell you when a download finishes. No push service is used and no device token is sent anywhere.</p>
+      </section>
+
+      <section>
+        <h2>Retention, deletion, and withdrawing consent</h2>
+        <p>Because your data lives on your device, you control all of it. In Settings you can clear temporary files, image cache, website data, search aliases, watch history, Continue Watching, ID mapping and the local library individually, or use Clear Everything to remove all of it at once. Deleting the app removes everything Shirox has stored, including downloads. Signing out of AniList or MyAnimeList removes that service's token from your device and stops all further communication with it; you can also revoke Shirox's access from your account settings on that service's own website. There is nothing for you to request from us, because there is nothing held by us to delete.</p>
+      </section>
+
+      <section>
+        <h2>Children</h2>
+        <p>Shirox is not directed at children under 13 and does not knowingly collect information from them.</p>
+      </section>
+
+      <section>
+        <h2>Changes to this policy</h2>
+        <p>If this policy changes, the updated version will be published on this page with a new date below. Continued use of the app after a change means the updated policy applies.</p>
+      </section>
+
+      <section>
+        <h2>Contact</h2>
+        <p>Questions about this policy can be raised through the public repository at github.com/xibrox/Shirox, where the maintainer can be reached.</p>
       </section>
 
       <section>
@@ -111,7 +145,7 @@
       </section>
     </div>
 
-    <p class="stamp">Last updated: May 30, 2026</p>
+    <p class="stamp">Last updated: August 26, 2026</p>
   </main>
 </body>
 </html>
