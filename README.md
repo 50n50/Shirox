@@ -12,7 +12,7 @@ keep it in sync with AniList and MyAnimeList, and play it from the sources *you*
 [![License](https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue)](LICENSE)
 [![Discord](https://img.shields.io/badge/discord-join-5865F2)](https://discord.com/invite/b9tZSuJj73)
 
-[Website](https://shiroxapp.github.io) · [Install](#install) · [Modules](#modules) · [Build from source](#build-from-source)
+[Modules](#modules) · [Build from source](#build-from-source)
 
 <img src="docs/screenshots/home.jpg" width="23%" alt="Home" />
 <img src="docs/screenshots/library.jpg" width="23%" alt="Library" />
@@ -73,30 +73,10 @@ wider grids, and full-screen playback.
 <img src="docs/screenshots/ipad-player.jpg" width="32%" alt="Player on iPad" />
 </div>
 
-## Install
-
-### AltStore / SideStore
-
-Add this source URL:
-
-```
-https://raw.githubusercontent.com/xibrox/Shirox/main/apps.json
-```
-
-### Direct download
-
-Every push to `main` publishes a fresh build to the [`beta` release](https://github.com/xibrox/Shirox/releases/tag/beta):
-
-| Platform | File |
-| --- | --- |
-| iPhone / iPad | `Shirox.ipa` — sideload with AltStore, SideStore or Sideloadly |
-| Mac | `Shirox-Catalyst.dmg` |
-
 ## Modules
 
 Modules are small JSON manifests pointing at a JavaScript file that knows how to search a site and
 resolve streams or chapters. Add one under **Settings → Modules** by pasting its manifest URL.
-Both Shirox and Luna-style manifests are accepted.
 
 Two first-party modules cover the sources that aren't websites:
 
@@ -104,8 +84,6 @@ Two first-party modules cover the sources that aren't websites:
 | --- | --- |
 | Local files | `https://raw.githubusercontent.com/xibrox/local-files-module/refs/heads/main/local.json` |
 | Jellyfin | `https://raw.githubusercontent.com/xibrox/jellyfin-module/refs/heads/main/jellyfin.json` |
-
-Community modules are shared in the [Discord](https://discord.com/invite/b9tZSuJj73).
 
 ## Build from source
 
