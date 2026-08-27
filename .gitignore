@@ -45,5 +45,6 @@ Configurations/Shirox.local.xcconfig
 .gemini/
 docs/*
 !docs/legal
+!docs/screenshots
 conductor/
 .worktrees

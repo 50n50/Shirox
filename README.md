@@ -1,68 +1,154 @@
-# Shirox
+<div align="center">
 
-Shirox is a free, source-available personal anime library manager for iOS 15+, designed with a focus on modern aesthetics.
+# 白 Shirox
+
+**Your anime and manga library, entirely yours.**
+
+A free, source-available library manager for iPhone, iPad and Mac. Track what you watch and read,
+keep it in sync with AniList and MyAnimeList, and play it from the sources *you* connect.
+
+[![Platform](https://img.shields.io/badge/platform-iOS%2015%2B%20%7C%20iPadOS%20%7C%20macOS-black)](https://github.com/xibrox/Shirox/releases)
+[![Version](https://img.shields.io/badge/version-1.0.4-ef4444)](https://github.com/xibrox/Shirox/releases)
+[![License](https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-blue)](LICENSE)
+[![Discord](https://img.shields.io/badge/discord-join-5865F2)](https://discord.com/invite/b9tZSuJj73)
+
+[Website](https://shiroxapp.github.io) · [Install](#install) · [Modules](#modules) · [Build from source](#build-from-source)
+
+<img src="docs/screenshots/home.jpg" width="23%" alt="Home" />
+<img src="docs/screenshots/library.jpg" width="23%" alt="Library" />
+<img src="docs/screenshots/detail.jpg" width="23%" alt="Detail" />
+<img src="docs/screenshots/player.jpg" width="23%" alt="Player" />
+
+</div>
+
+## What it is
+
+Shirox ships with no content of its own. It's a native SwiftUI shell around three things you bring:
+your **tracker account** (AniList or MyAnimeList), your **sources** (community modules, a Jellyfin
+server, or files on your device), and your **library**. Everything else — progress, downloads,
+playback, reading — happens on your device.
+
+Shirox does not host, provide or endorse any content.
 
 ## Features
 
--   **Community Modules**: Organize and manage your anime collection powered by modular, community-built content providers.
--   **AniList Integration**: Seamlessly sync your watch history, discover new titles, and manage your lists with AniList integration.
--   **Enhanced Social**: Explore user profiles, activity feeds, and interact with the community (Likes, Replies, Follows).
--   **Continue Watching**: Automatically track your progress and pick up right where you left off.
--   **Modern Player**: Full support for Picture-in-Picture (PiP), AirPlay, Chromecast and customizable subtitles.
--   **Clean UI**: A native SwiftUI interface that supports both Light and Dark modes with an adaptive design.
+**Tracking**
+- AniList and MyAnimeList side by side, with per-provider toggles for what gets written where
+- Anime and manga in one library, with season-aware progress across multi-season and continuous releases
+- Continue Watching and Continue Reading pick up mid-episode and mid-chapter
+- Writes queue on disk when you're offline or rate-limited, and flush on the next launch
+- Social: profiles, activity feeds, likes, replies, follows and notifications
 
-## Installation
+**Sources**
+- Community modules — JavaScript content providers you install from a URL
+- Jellyfin: connect your own server and browse it as a native library
+- Local files: play media stored on your device, organized into your own collections
+
+**Player**
+- Picture-in-Picture, AirPlay and Chromecast
+- Subtitles with adjustable size, color, shadow, position and timing offset
+- Source, quality, audio track and playback speed from menus in the player bar
+- Skip intro and outro where timestamps exist, plus auto-advance into the next episode or sequel
+- The next episode's stream is resolved before you need it
+
+**Offline**
+- HLS episode downloads on a background session, so they keep running once you leave the app
+- Manga chapter downloads, single or batched by range
+- Downloaded titles browse, play and read with no network at all
+
+**On every screen**
+- Native SwiftUI throughout, in light and dark
+- Home Screen quick actions straight into Search, Downloads or Library
+- Adult titles filtered out of module search results by default
+- Image and library caches you can inspect and clear from Settings
+
+## On iPad and Mac
+
+The same app, not a stretched phone layout: a top bar and a Mac sidebar in place of the tab bar,
+wider grids, and full-screen playback.
+
+<div align="center">
+<img src="docs/screenshots/ipad-home.jpg" width="32%" alt="Home on iPad" />
+<img src="docs/screenshots/ipad-library.jpg" width="32%" alt="Library on iPad" />
+<img src="docs/screenshots/ipad-player.jpg" width="32%" alt="Player on iPad" />
+</div>
+
+## Install
 
 ### AltStore / SideStore
-You can add Shirox to AltStore or SideStore by using the following source URL:
-`https://raw.githubusercontent.com/xibrox/Shirox/main/apps.json`
 
-### Manual IPA
-Download the latest IPA from the [Releases](https://github.com/xibrox/Shirox/releases) page and sideload it using your preferred method (AltStore, Sideloadly, etc.).
+Add this source URL:
 
-## Development
+```
+https://raw.githubusercontent.com/xibrox/Shirox/main/apps.json
+```
 
-### Prerequisites
--   macOS with Xcode 15+
--   iOS 15.0+ (Simulator or Physical Device)
--   [CocoaPods](https://cocoapods.org/)
+### Direct download
 
-### Setup
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/xibrox/Shirox.git
-   cd Shirox
-   ```
-2. Install dependencies:
-   ```bash
-   pod install
-   ```
-3. Open `Shirox.xcworkspace` in Xcode.
-4. Select the `Shirox_iOS` scheme and run.
+Every push to `main` publishes a fresh build to the [`beta` release](https://github.com/xibrox/Shirox/releases/tag/beta):
+
+| Platform | File |
+| --- | --- |
+| iPhone / iPad | `Shirox.ipa` — sideload with AltStore, SideStore or Sideloadly |
+| Mac | `Shirox-Catalyst.dmg` |
+
+## Modules
+
+Modules are small JSON manifests pointing at a JavaScript file that knows how to search a site and
+resolve streams or chapters. Add one under **Settings → Modules** by pasting its manifest URL.
+Both Shirox and Luna-style manifests are accepted.
+
+Two first-party modules cover the sources that aren't websites:
+
+| Module | Manifest |
+| --- | --- |
+| Local files | `https://raw.githubusercontent.com/xibrox/local-files-module/refs/heads/main/local.json` |
+| Jellyfin | `https://raw.githubusercontent.com/xibrox/jellyfin-module/refs/heads/main/jellyfin.json` |
+
+Community modules are shared in the [Discord](https://discord.com/invite/b9tZSuJj73).
+
+## Build from source
+
+Requires macOS with Xcode 16 or newer. There is no CocoaPods step — dependencies are Swift
+Packages and Xcode resolves them on first open.
+
+```bash
+git clone https://github.com/xibrox/Shirox.git
+cd Shirox
+open Shirox.xcodeproj
+```
+
+Pick a scheme and run:
+
+| Scheme | Target |
+| --- | --- |
+| `Shirox_iOS` | iPhone and iPad (iOS 15+) |
+| `Shirox_MacCatalyst` | Mac (macOS 14+) |
+| `Shirox_macOS` | native macOS, in progress |
+| `Shirox_tvOS` | Apple TV, in progress |
+
+Or use the release scripts directly: `./buildipa.sh` (IPA), `./buildcatalyst.sh` (Catalyst DMG),
+`./builddmg.sh` (native macOS DMG).
+
+Dependencies: [Kingfisher](https://github.com/onevcat/Kingfisher) for image caching,
+[google-cast-spm](https://github.com/castlabs/google-cast-spm) for Chromecast, and
+[FakeWebKit](https://github.com/undeaDD/FakeWebKit) for sources behind Cloudflare.
 
 ## Contributing
 
-Contributions are welcome! Whether it's fixing bugs, adding new features, or improving documentation, feel free to open a Pull Request.
+Issues and pull requests are welcome — bugs, features, modules, docs. Branch off `main`, keep
+[SwiftLint](.swiftlint.yml) happy, and open a PR describing what changed and how you tested it.
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+## Community and support
 
-## Community
+Join the [Discord](https://discord.com/invite/b9tZSuJj73) for help, module sharing and build
+announcements. If Shirox is useful to you, you can support it on [Ko-fi](https://ko-fi.com/xibrox).
 
-Join the Discord server to get support, share modules, and chat with other users: [discord.gg/b9tZSuJj73](https://discord.com/invite/b9tZSuJj73)
+## License
 
-## ☕ Support
-
-If you enjoy Shirox and want to support development, consider supporting the project!
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/xibrox)
-
-## ⚖️ License
-
-Distributed under the PolyForm Noncommercial License 1.0.0. See `LICENSE` for more information.
+[PolyForm Noncommercial License 1.0.0](LICENSE). Free to use, modify and share for any purpose
+other than commercial use.
 
 ---
-Built with ❤️ by [xibrox](https://github.com/xibrox)
+
+Built by [xibrox](https://github.com/xibrox)
