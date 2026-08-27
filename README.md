@@ -119,7 +119,7 @@ Issues and pull requests are welcome — bugs, features, modules, docs. Branch o
 
 ## Community and support
 
-Join the [Discord](https://discord.com/invite/b9tZSuJj73) for help, module sharing and build
+Join the [Discord](https://discord.com/invite/b9tZSuJj73) for help and build
 announcements. If Shirox is useful to you, you can support it on [Ko-fi](https://ko-fi.com/xibrox).
 
 ## License
