@@ -24,7 +24,7 @@ keep it in sync with AniList and MyAnimeList, and play it from the sources *you*
 ## What it is
 
 Shirox ships with no content of its own. It's a native SwiftUI shell around three things you bring:
-your **tracker account** (AniList or MyAnimeList), your **sources** (community modules, a Jellyfin
+your **tracker account** (AniList or MyAnimeList), your **sources** (modules, a Jellyfin
 server, or files on your device), and your **library**. Everything else — progress, downloads,
 playback, reading — happens on your device.
 
@@ -40,7 +40,7 @@ Shirox does not host, provide or endorse any content.
 - Social: profiles, activity feeds, likes, replies, follows and notifications
 
 **Sources**
-- Community modules — JavaScript content providers you install from a URL
+- Modules — JavaScript content providers you install from a URL
 - Jellyfin: connect your own server and browse it as a native library
 - Local files: play media stored on your device, organized into your own collections
 
