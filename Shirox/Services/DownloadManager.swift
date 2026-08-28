@@ -311,7 +311,7 @@ final class DownloadManager: NSObject, ObservableObject {
     /// Downloads a subtitle file to disk and stores its relative path on the item.
     /// Silent on failure — the video still plays without subtitles.
     private func downloadSubtitleFile(itemID: UUID, url: URL, headers: [String: String]) async {
-        Logger.shared.log("[Subtitles] Downloading subtitle from \(url.absoluteString)", type: "Download")
+        Logger.shared.log("[Subtitles] Downloading subtitle from \(Logger.redact(url))", type: "Download")
 
         var req = URLRequest(url: url, timeoutInterval: 30)
         // Browser-like default headers — many subtitle hosts reject the default

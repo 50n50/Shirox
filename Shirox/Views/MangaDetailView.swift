@@ -707,6 +707,12 @@ struct MangaDetailView: View {
     }
 
     private func openContinue(_ detail: MangaDetail) {
+        // Opening the reader with no chapters leaves it with nothing to display; the reader
+        // handles this as an error state, but there is no point pushing it in the first place.
+        guard !detail.chapters.isEmpty else {
+            ToastManager.shared.show(message: "No chapters found", type: .error)
+            return
+        }
         if let last = progress.lastRead(for: item.href),
            let idx = detail.chapters.firstIndex(where: { $0.href == last.chapterHref }) {
             readerContext = makeContext(

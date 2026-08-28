@@ -80,6 +80,12 @@ struct PlayerView: View {
     @State private var autoAdvanceTask: Task<Void, Never>? = nil
     @State private var timeObserver: Any? = nil
     @State private var rateObserver: NSKeyValueObservation? = nil
+    /// KVO on the current item's `status`. Held so it survives `setupPlayer` returning and is
+    /// torn down on the next setup / on exit.
+    @State private var statusObserver: NSKeyValueObservation? = nil
+    /// Tokens for the current item's end-of-playback notification observers, so each new item
+    /// replaces them instead of stacking another pair on top.
+    @State private var itemNotificationObservers: [NSObjectProtocol] = []
     @State private var lastSavedSeconds: Double = 0
     @State private var loadingOpacity = 0.8
     @State private var didSeekToResume = false
@@ -355,6 +361,10 @@ struct PlayerView: View {
             cancelStallWatchdog(resetAttempts: true)
             if let obs = timeObserver { player?.removeTimeObserver(obs) }
             rateObserver?.invalidate()
+            statusObserver?.invalidate()
+            statusObserver = nil
+            for token in itemNotificationObservers { NotificationCenter.default.removeObserver(token) }
+            itemNotificationObservers.removeAll()
             player?.pause()
             saveProgress()
             tearDownNowPlaying()
@@ -1201,7 +1211,7 @@ struct PlayerView: View {
                 #else
                 castURL = currentStream.url
                 #endif
-                Logger.shared.log("[Cast] proxy URL: \(castURL)", type: "Stream")
+                Logger.shared.log("[Cast] proxy URL: \(Logger.redact(castURL))", type: "Stream")
             } else {
                 castURL = currentStream.url
             }
@@ -1376,7 +1386,9 @@ struct PlayerView: View {
 
         if !currentStream.url.isFileURL, HostBlocklist.shared.isBlocked(currentStream.url) {
             Logger.shared.log("[Player] Refusing blocked host: \(currentStream.url.host ?? "?")", type: "Error")
-            videoReady = false
+            // Leaving `player` nil here parks the user on the "Loading…" placeholder forever with
+            // no explanation and no way out but the close button. Surface the failure instead.
+            surfaceUnrecoverablePlayback()
             return
         }
 
@@ -1393,22 +1405,7 @@ struct PlayerView: View {
         item.preferredForwardBufferDuration = 0 // Automatic: let AVPlayer size the buffer adaptively (YouTube-style ABR). A fixed value fights stall-minimization and prolongs stalls on flaky CDNs.
         item.canUseNetworkResourcesForLiveStreamingWhilePaused = true // Continue buffering when paused
         
-        // Fix: Local files and fast streams might already be ready or need a status observer
-        Task { @MainActor in
-            for await status in item.publisher(for: \.status).values {
-                Logger.shared.log("[Player] Item status: \(status.rawValue)", type: "Debug")
-                if status == .readyToPlay {
-                    if currentContext?.resumeFrom == nil {
-                        videoReady = true
-                    }
-                    break
-                } else if status == .failed {
-                    Logger.shared.log("[Player] Item failed: \(item.error?.localizedDescription ?? "unknown error")", type: "Error")
-                    videoReady = true // Show player so user can see error state
-                    break
-                }
-            }
-        }
+        observeItemStatus(item)
 
         Task {
             guard let group = try? await asset.loadMediaSelectionGroup(for: .audible) else { return }
@@ -1484,19 +1481,6 @@ struct PlayerView: View {
             }
         }
 
-
-        if canRecoverStream {
-            Task { @MainActor [weak p] in
-                for await status in item.publisher(for: \.status).values {
-                    guard let currentItem = p?.currentItem, currentItem === item else { break }
-                    if status == .failed {
-                        guard !isRefetchingStream else { break }
-                        await refetchStream()
-                        break
-                    } else if status == .readyToPlay { break }
-                }
-            }
-        }
 
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak p] time in
@@ -1756,25 +1740,80 @@ struct PlayerView: View {
         center.skipBackwardCommand.removeTarget(nil)
     }
 
-    private func setupPlaybackEndObserver(for item: AVPlayerItem) {
-        NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { _ in
-            autoAdvanceTask = Task { @MainActor in
-                isPlaying = false
-                setControlsVisible(true)
-                if autoNextEpisode { await loadAndAdvance() }
+    /// Watches `item.status` so a stream that dies is re-extracted instead of leaving the user on
+    /// a spinner. Must be re-attached for every item the player takes on — `setupPlayer` for the
+    /// launch item, `swapStream` for episode advances, quality switches and refetch recoveries.
+    ///
+    /// Plain KVO (`.initial` + `.new`) rather than `publisher(for:).values`: AsyncPublisher buffers
+    /// a single element and drops whatever the consumer hasn't demanded yet, so the fast
+    /// `.unknown` -> `.failed` transition an expired CDN URL produces (within a few hundred ms of
+    /// the item being created) was routinely dropped before the `for await` loop got its first
+    /// demand in. The player then never learned the stream had failed: no refetch, no error, just
+    /// the loading overlay until the 10s fallback swapped it for a permanently black frame.
+    /// `.initial` additionally covers an item that is already ready/failed when we attach.
+    private func observeItemStatus(_ item: AVPlayerItem) {
+        statusObserver?.invalidate()
+        statusObserver = item.observe(\.status, options: [.initial, .new]) { observedItem, _ in
+            let status = observedItem.status
+            DispatchQueue.main.async {
+                // Ignore an observer left over from an item the player has already swapped out.
+                // `player` is still nil for the launch item's very first callback — accept that.
+                guard player == nil || player?.currentItem === observedItem else { return }
+                switch status {
+                case .readyToPlay:
+                    Logger.shared.log("[Player] Item status: readyToPlay", type: "Debug")
+                    // With a resume position the overlay stays up until the seek lands, so the
+                    // user never sees a frame from the wrong position.
+                    if currentContext?.resumeFrom == nil { videoReady = true }
+                case .failed:
+                    Logger.shared.log("[Player] Item failed: \(observedItem.error?.localizedDescription ?? "unknown error")", type: "Error")
+                    guard canRecoverStream, !isRefetchingStream else {
+                        // Nothing to re-extract — surface the failure instead of spinning forever.
+                        surfaceUnrecoverablePlayback()
+                        return
+                    }
+                    Task { @MainActor in await refetchStream() }
+                case .unknown:
+                    break
+                @unknown default:
+                    break
+                }
             }
         }
+    }
+
+    private func setupPlaybackEndObserver(for item: AVPlayerItem) {
+        // Block-based observers must be unregistered by token. setupPlayer() runs again on every
+        // quality switch, episode advance and recovery rebuild, so without this each session
+        // stacked up another pair of permanently-registered closures (each retaining the old item).
+        for token in itemNotificationObservers { NotificationCenter.default.removeObserver(token) }
+        itemNotificationObservers.removeAll()
+
+        itemNotificationObservers.append(
+            NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) { _ in
+                // Only the item actually on screen may auto-advance; a stale item reaching its end
+                // would otherwise skip the user forward an episode.
+                guard player?.currentItem === item else { return }
+                autoAdvanceTask = Task { @MainActor in
+                    isPlaying = false
+                    setControlsVisible(true)
+                    if autoNextEpisode { await loadAndAdvance() }
+                }
+            }
+        )
         // A stream that dies *after* it was already playing — most often an expired CDN
         // URL after a long background — posts this instead of flipping the item's status
         // to .failed, so the .failed KVO path in setupPlayer never catches it. Re-extract
         // a fresh URL, preserving position. Guard to the live item so a stale observer
         // left over from a swapped-out item can't trigger a spurious refetch.
-        NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { note in
-            guard canRecoverStream, !isRefetchingStream, player?.currentItem === item else { return }
-            let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            Logger.shared.log("[StreamExpiry] failedToPlayToEndTime: \(err?.localizedDescription ?? "unknown") — refetching", type: "Player")
-            Task { @MainActor in await recoverPlayback() }
-        }
+        itemNotificationObservers.append(
+            NotificationCenter.default.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) { note in
+                guard canRecoverStream, !isRefetchingStream, player?.currentItem === item else { return }
+                let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+                Logger.shared.log("[StreamExpiry] failedToPlayToEndTime: \(err?.localizedDescription ?? "unknown") — refetching", type: "Player")
+                Task { @MainActor in await recoverPlayback() }
+            }
+        )
     }
 
     @MainActor
@@ -1824,7 +1863,11 @@ struct PlayerView: View {
             isRefetchingStream = true
             let stream = await resolveLocalStream()
             isRefetchingStream = false
-            guard let stream else { return }
+            guard let stream else {
+                Logger.shared.log("[StreamExpiry] Could not re-resolve local stream", type: "Error")
+                surfaceUnrecoverablePlayback()
+                return
+            }
             swapStream(stream, episodeNumber: currentContext?.episodeNumber ?? 1, episodeHref: currentContext?.episodeHref)
             return
         }
@@ -1835,7 +1878,14 @@ struct PlayerView: View {
             // after an auto-advance currentContext points at the new episode.
             let streams = try await loader(currentContext?.episodeNumber ?? 1, currentContext?.episodeHref)
             isRefetchingStream = false
-            guard !streams.isEmpty else { return }
+            // Nothing to swap in. This is now the main recovery path for a failed item, so
+            // bailing quietly leaves the user on a black frame with no explanation and no way
+            // to retry — surface the retry UI instead.
+            guard !streams.isEmpty else {
+                Logger.shared.log("[StreamExpiry] Refetch returned no streams", type: "Error")
+                surfaceUnrecoverablePlayback()
+                return
+            }
             let isSub = currentStream.subtitle != nil
             
             // Break down complex expression for compiler
@@ -1849,7 +1899,20 @@ struct PlayerView: View {
                 ?? streams[0]
 
             swapStream(match, episodeNumber: currentContext?.episodeNumber ?? 1, episodeHref: currentContext?.episodeHref)
-        } catch { isRefetchingStream = false }
+        } catch {
+            Logger.shared.log("[StreamExpiry] Refetch failed: \(error.localizedDescription)", type: "Error")
+            isRefetchingStream = false
+            surfaceUnrecoverablePlayback()
+        }
+    }
+
+    /// Ends the "we're still trying" state and offers a manual retry. Used wherever automatic
+    /// recovery has run out of road, so playback never dead-ends on a silent black frame.
+    @MainActor
+    private func surfaceUnrecoverablePlayback() {
+        videoReady = true
+        isBuffering = false
+        showStallRetry = true
     }
 
     // MARK: - Stall Recovery
@@ -2276,6 +2339,10 @@ struct PlayerView: View {
         newItem.preferredForwardBufferDuration = 0
         newItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         setupPlaybackEndObserver(for: newItem)
+        // Every replacement item needs its own failure detection — the observer set up at launch
+        // watches the item it was given, so without this a dead URL after a quality switch was
+        // never noticed at all.
+        observeItemStatus(newItem)
         player?.replaceCurrentItem(with: newItem)
         subtitleTracks = next.allSubtitles ?? subtitleTracks
         currentStream = next
@@ -2330,6 +2397,10 @@ struct PlayerView: View {
         newItem.preferredForwardBufferDuration = 0
         newItem.canUseNetworkResourcesForLiveStreamingWhilePaused = true
         setupPlaybackEndObserver(for: newItem)
+        // Likewise for the episode being swapped in (auto-advance, next-episode pick, sequel,
+        // refetch recovery): without this, a dead URL on episode 2 onwards produced a black
+        // screen with no refetch and no error — the launch item's observer no longer applies.
+        observeItemStatus(newItem)
         player?.replaceCurrentItem(with: newItem)
         player?.rate = Float(playbackSpeed)
         isPlaying = true
@@ -2764,6 +2835,15 @@ class PlayerHostingController<Content: View>: UIHostingController<Content> {
     }
 
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        // Only steer the presentation when Force Landscape is on. UIKit consults this whenever
+        // the current orientation isn't in supportedInterfaceOrientations — so returning a
+        // landscape side unconditionally forced a landscape player on a user who had the feature
+        // off and simply happened to be holding the phone upside-down (the one portrait
+        // orientation `.allButUpsideDown` excludes).
+        guard UserDefaults.standard.bool(forKey: "forceLandscape") else {
+            let current = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.interfaceOrientation
+            return (current ?? .portrait) == .portraitUpsideDown ? .portrait : (current ?? .portrait)
+        }
         let lastRaw = UserDefaults.standard.integer(forKey: "lastLandscapeOrientation")
         let last = UIInterfaceOrientation(rawValue: lastRaw)
         if let last = last, last.isLandscape { return last }

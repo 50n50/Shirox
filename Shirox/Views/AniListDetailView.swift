@@ -37,6 +37,20 @@ struct AniListDetailView: View {
     @State private var showBatchDownloadPicker = false
     #endif
     @State private var selectedRangeIndex = 0
+
+    /// The selected 100-episode window, clamped to what this show actually has.
+    /// `selectedRangeIndex` is seeded in onAppear from a Continue Watching episode number before
+    /// the episode count is known, so it can point past the end (absolute numbering, a different
+    /// source). An out-of-range index made `start > end` and rendered NO episodes at all — and the
+    /// range menu only appears above 100 episodes, so there was no way to get back.
+    private func clampedRange(totalEpisodes: Int) -> ClosedRange<Int>? {
+        guard totalEpisodes > 0 else { return nil }
+        let maxRange = (totalEpisodes - 1) / 100
+        let rangeIdx = min(max(selectedRangeIndex, 0), maxRange)
+        let start = rangeIdx * 100 + 1
+        let end = min((rangeIdx + 1) * 100, totalEpisodes)
+        return start <= end ? start...end : nil
+    }
     @State private var isReversed = false
     @State private var selectedTab = 0
     @State private var sequelMediaId: Int? = nil
@@ -1088,9 +1102,10 @@ struct AniListDetailView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "list.number")
                                 .font(.subheadline)
-                            let start = selectedRangeIndex * 100 + 1
-                            let end = min((selectedRangeIndex + 1) * 100, totalEpisodes)
-                            Text("\(start)-\(end)")
+                            // Same clamp as the list, so the button never advertises a range
+                            // different from the episodes actually shown.
+                            let window = clampedRange(totalEpisodes: totalEpisodes)
+                            Text("\(window?.lowerBound ?? 1)-\(window?.upperBound ?? totalEpisodes)")
                                 .font(.subheadline.weight(.medium))
                             Image(systemName: "chevron.down")
                                 .font(.caption)
@@ -1116,11 +1131,10 @@ struct AniListDetailView: View {
             #if os(iOS)
             if isSelectionMode {
                 HStack {
-                    let currentRangeStart = selectedRangeIndex * 100 + 1
-                    let currentRangeEnd = min((selectedRangeIndex + 1) * 100, totalEpisodes)
-                    
-                    if currentRangeStart <= currentRangeEnd {
-                        let rangeEpisodes = Array(currentRangeStart...currentRangeEnd)
+                    if let window = clampedRange(totalEpisodes: totalEpisodes) {
+                        let currentRangeStart = window.lowerBound
+                        let currentRangeEnd = window.upperBound
+                        let rangeEpisodes = Array(window)
                         let selectableEpisodes = rangeEpisodes.filter { ep in
                             let state = DownloadManager.shared.items.first { 
                                 $0.aniListID == mediaId && $0.episodeNumber == ep 
@@ -1178,11 +1192,8 @@ struct AniListDetailView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             } else if totalEpisodes > 0 {
-                let start = selectedRangeIndex * 100 + 1
-                let end = min((selectedRangeIndex + 1) * 100, totalEpisodes)
-                
-                if start <= end {
-                    let range = Array(start...end)
+                if let window = clampedRange(totalEpisodes: totalEpisodes) {
+                    let range = Array(window)
                     let sortedRange = isReversed ? range.reversed() : range
                     
                     LazyVStack(spacing: 8) {

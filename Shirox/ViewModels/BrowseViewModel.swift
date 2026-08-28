@@ -44,10 +44,11 @@ final class BrowseViewModel: ObservableObject {
         isLoading = false
     }
 
+    /// Backs both the error-state Retry button and pull-to-refresh, so it must start over rather
+    /// than continue paging: it previously left `currentPage` and `items` untouched, so pulling to
+    /// refresh a populated grid just appended the *next* page to the bottom instead of reloading.
     func retry() async {
-        error = nil
-        hasMore = true
-        await loadMore()
+        await reset()
     }
 
     private func reset() async {

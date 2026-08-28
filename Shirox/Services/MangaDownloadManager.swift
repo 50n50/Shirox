@@ -223,16 +223,31 @@ final class MangaDownloadManager: ObservableObject {
         var names = [String?](repeating: nil, count: total)
         var done = 0
 
+        // Reject unusable page URLs up front rather than mid-window. The sliding window used to
+        // skip a malformed URL by returning from `enqueue` without adding a task, which shrank
+        // the window by one — and if the whole first window was malformed the group started
+        // empty, `group.next()` returned nil immediately, and the chapter "completed" with zero
+        // pages written. Every page failure otherwise fails the chapter (fetchPage throws), so
+        // a bad URL should too instead of silently yielding a short chapter.
+        let parsed: [URL] = try urls.map {
+            guard let url = URL(string: $0) else {
+                throw NSError(domain: "MangaDownloadManager", code: -1, userInfo: [
+                    NSLocalizedDescriptionKey: "Chapter contains an unreadable page URL"
+                ])
+            }
+            return url
+        }
+
         try await withThrowingTaskGroup(of: (Int, Data).self) { group in
             var next = 0
             func enqueue(_ i: Int) {
-                guard let url = URL(string: urls[i]) else { return }
+                let url = parsed[i]
                 group.addTask { (i, try await Self.fetchPage(url: url, referer: referer)) }
             }
             while next < min(maxPagesInFlight, total) { enqueue(next); next += 1 }
 
             while let (i, data) = try await group.next() {
-                let name = MangaDownloadPlanning.pageFileName(index: i, total: total, url: URL(string: urls[i])!)
+                let name = MangaDownloadPlanning.pageFileName(index: i, total: total, url: parsed[i])
                 try data.write(to: folder.appendingPathComponent(name), options: .atomic)
                 names[i] = name
                 done += 1

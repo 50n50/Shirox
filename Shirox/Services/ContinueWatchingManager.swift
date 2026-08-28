@@ -1160,6 +1160,11 @@ import Combine
         if storedVersion != Self.currentDataVersion {
             UserDefaults.standard.removeObject(forKey: Keys.storage)
             UserDefaults.standard.removeObject(forKey: Keys.watched)
+            // Must be cleared with the rest: leaving the href markers behind after a version
+            // wipe left episodes flagged watched with no items backing them, and `isWatchedHref`
+            // takes priority over the (now empty) number keys — so a migration silently marked
+            // episodes of a freshly-cleared show as already seen.
+            UserDefaults.standard.removeObject(forKey: Keys.watchedHrefs)
             UserDefaults.standard.set(Self.currentDataVersion, forKey: Keys.dataVersion)
             return
         }

@@ -203,7 +203,7 @@ final class LocalPlaybackCoordinator: ObservableObject {
                 isLocalPlayback: true
             )
 
-            Logger.shared.log("[Local] launching player url=\(playURL.absoluteString) isFileURL=\(playURL.isFileURL) subtitle=\(subtitle != nil)", type: "Stream")
+            Logger.shared.log("[Local] launching player url=\(Logger.redact(playURL)) isFileURL=\(playURL.isFileURL) subtitle=\(subtitle != nil)", type: "Stream")
 
             // The picker that triggered this is still animating away; presenting the
             // player immediately would be dropped (UIKit can't present over a VC that

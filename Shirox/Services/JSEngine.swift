@@ -403,12 +403,35 @@ final class JSEngine: ObservableObject {
         promise.invokeMethod("catch", withArguments: [catchFn as Any])
     }
 
-    /// Async wrapper for callAsyncJS
-    func callAsyncJS(_ functionName: String, args: [Any]) async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
-            callAsyncJS(functionName, args: args) { result in
-                cont.resume(with: result)
+    /// Async wrapper for callAsyncJS.
+    ///
+    /// Bounded and resume-once, because the underlying callback is driven by a JS Promise from an
+    /// untrusted module script:
+    ///
+    /// * A promise that never settles (a hung request inside the module, a swallowed rejection,
+    ///   a code path that simply never calls resolve) left the continuation suspended forever.
+    ///   Every caller inherited that: the stream picker span forever, `refetchStream` never
+    ///   released `isRefetchingStream` — blocking all later recovery — and the next-episode
+    ///   prefetch leaked a task. Cancelling the enclosing Task does not resume a continuation, so
+    ///   even backing out of the screen didn't clear it. The timeout converts a hang into a normal
+    ///   error the existing paths already handle.
+    /// * A thenable that invokes both its resolve and reject callbacks (or either one twice) would
+    ///   resume the continuation more than once, which traps at runtime. The gate makes the first
+    ///   outcome win and drops the rest.
+    func callAsyncJS(_ functionName: String, args: [Any], timeout: TimeInterval = 120) async throws -> String {
+        let gate = ContinuationGate()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                gate.attach(cont)
+                callAsyncJS(functionName, args: args) { result in
+                    gate.settle(result)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                    gate.settle(.failure(JSEngineError.timedOut(functionName)))
+                }
             }
+        } onCancel: {
+            gate.settle(.failure(CancellationError()))
         }
     }
 
@@ -436,11 +459,52 @@ final class JSEngine: ObservableObject {
     }
 }
 
+/// Resume-once gate for a checked continuation that several independent callbacks can complete
+/// (the JS promise, a timeout, task cancellation). Only the first outcome is delivered.
+/// Shared by `JSEngine` and `ModuleJSRunner`, which both bridge untrusted module promises.
+final class ContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String, Error>?
+    private var pending: Result<String, Error>?
+    private var finished = false
+
+    /// Stores the continuation, delivering immediately if an outcome already arrived.
+    func attach(_ cont: CheckedContinuation<String, Error>) {
+        lock.lock()
+        if let pending {
+            self.pending = nil
+            finished = true
+            lock.unlock()
+            cont.resume(with: pending)
+            return
+        }
+        continuation = cont
+        lock.unlock()
+    }
+
+    /// Delivers the first outcome; later calls are no-ops.
+    func settle(_ result: Result<String, Error>) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        guard let cont = continuation else {
+            // Raced ahead of attach (cancellation can fire before the body runs) — hold it.
+            pending = result
+            lock.unlock()
+            return
+        }
+        continuation = nil
+        finished = true
+        lock.unlock()
+        cont.resume(with: result)
+    }
+}
+
 enum JSEngineError: LocalizedError {
     case functionNotFound(String)
     case nullResult
     case jsError(String)
     case parseError(String)
+    case timedOut(String)
 
     var errorDescription: String? {
         switch self {
@@ -448,6 +512,7 @@ enum JSEngineError: LocalizedError {
         case .nullResult: return "JS function returned null/undefined"
         case .jsError(let msg): return "JS error: \(msg)"
         case .parseError(let msg): return "Parse error: \(msg)"
+        case .timedOut(let name): return "Module function '\(name)' timed out"
         }
     }
 }

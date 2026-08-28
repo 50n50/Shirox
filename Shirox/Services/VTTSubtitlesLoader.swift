@@ -164,11 +164,14 @@ enum VTTSubtitlesLoader {
         guard parts.count >= 2 else { return nil }
 
         let startStr = parts[0].trimmingCharacters(in: .whitespaces)
-        // The end part may have cue settings appended; take only the first token
+        // The end part may have cue settings appended; take only the first token. Split on any
+        // whitespace, not just a literal space — WebVTT permits tabs between the timestamp and
+        // its settings, and splitting on " " alone left "00:00:05.000\talign:start" intact, so
+        // parseTimestamp rejected it and the cue was silently dropped.
         let endStr = parts[1]
             .trimmingCharacters(in: .whitespaces)
-            .components(separatedBy: " ")[0]
-            .trimmingCharacters(in: .whitespaces)
+            .components(separatedBy: .whitespaces)
+            .first(where: { !$0.isEmpty }) ?? ""
 
         guard let start = parseTimestamp(startStr),
               let end   = parseTimestamp(endStr) else {

@@ -224,7 +224,14 @@ final class CloudflareBypassManager: ObservableObject {
             if let value = await cfClearanceCookie(for: host, in: webView) {
                 let fullHeader = await allCookiesHeader(for: host, in: webView)
                 let ua = (try? await webView.evaluateJavaScript("navigator.userAgent") as? String) ?? ""
-                Logger.shared.log("[CFBypass] Got cf_clearance for \(host) after \(i + 1) polls, cookies=\(fullHeader.prefix(120))", type: "Debug")
+                // Log the cookie *names* only. The header's values include the live cf_clearance
+                // session token, and these logs are written to logs.txt and exported from
+                // Settings → App Logs — which is exactly what users paste into bug reports.
+                let cookieNames = fullHeader
+                    .split(separator: ";")
+                    .compactMap { $0.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces) }
+                    .joined(separator: ",")
+                Logger.shared.log("[CFBypass] Got cf_clearance for \(host) after \(i + 1) polls, cookies=[\(cookieNames)]", type: "Debug")
                 store(cookie: value, cookieHeader: fullHeader, userAgent: ua, for: host)
                 bypassWebViews[host] = webView
                 if pendingVerificationURL?.host == host { pendingVerificationURL = nil }

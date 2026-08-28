@@ -55,8 +55,16 @@ final class PlayerPresenter: ObservableObject {
     #else
     static func findTopViewController(_ viewController: UIViewController? = nil) -> UIViewController? {
         let root = viewController ?? UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.windows.first?.rootViewController }
-            .first
+            .compactMap { $0 as? UIWindowScene }
+            // The app's own window, not whichever window happens to be first: the Cloudflare
+            // bypass runs in a separate `.alert`-level window, and presenting the player on that
+            // one puts it behind/inside a window that gets torn down.
+            .compactMap { scene in
+                scene.windows.first(where: { $0.isKeyWindow })
+                    ?? scene.windows.first(where: { !$0.isHidden && $0.windowLevel == .normal })
+                    ?? scene.windows.first
+            }
+            .first?.rootViewController
 
         if let presented = root?.presentedViewController, !presented.isBeingDismissed {
             return findTopViewController(presented)
@@ -74,8 +82,43 @@ final class PlayerPresenter: ObservableObject {
         return root
     }
 
+    /// ~2 seconds at 100ms per attempt — long enough to outlast a sheet dismissal animation,
+    /// short enough that a genuinely stuck hierarchy doesn't retry forever.
+    private static let maxPresentRetries = 20
+    /// Retries left for the in-flight `presentPlayer` attempt (see `presentPlayer`).
+    private var presentRetriesRemaining = PlayerPresenter.maxPresentRetries
+
     func presentPlayer(stream: StreamResult, streams: [StreamResult] = [], context: PlayerContext? = nil, onWatchNext: WatchNextLoader? = nil, onStreamExpired: StreamRefetchLoader? = nil, onSequelNeeded: SequelLoader? = nil, onSequelAdvanced: ((SequelNavigation) -> Void)? = nil, onFinished: ((PlayerContext) -> Void)? = nil, from sourceView: UIView? = nil) {
         guard let topVC = Self.findTopViewController() else { return }
+
+        // A player is already on screen (double-tap on an episode row, or a re-entrant launch
+        // while the previous one is still animating in). Presenting a second one stacks two
+        // AVPlayers, both holding audio focus. Checked against the window so a stale reference
+        // can never wedge playback shut; a player on its way out falls through to the retry
+        // below instead, so relaunching straight after a dismiss still works.
+        if let existing = playerVC, existing.viewIfLoaded?.window != nil, !existing.isBeingDismissed { return }
+
+        // UIKit silently refuses to present on a controller that is still presenting something
+        // else — which is exactly what happens when the stream-picker sheet is still animating
+        // out. Call sites schedule us on a fixed `streamSelectionDelay`, and when that delay
+        // isn't long enough (slow device, heavy detail screen, a sheet that dismissed late) the
+        // player just never appeared and the user was left staring at the episode list. Wait for
+        // the hierarchy to settle instead of dropping the launch on the floor.
+        if topVC.presentedViewController != nil || topVC.isBeingDismissed || topVC.isBeingPresented {
+            guard presentRetriesRemaining > 0 else {
+                Logger.shared.log("[Player] Presentation blocked and retries exhausted — giving up", type: "Error")
+                presentRetriesRemaining = Self.maxPresentRetries
+                return
+            }
+            presentRetriesRemaining -= 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.presentPlayer(stream: stream, streams: streams, context: context, onWatchNext: onWatchNext, onStreamExpired: onStreamExpired, onSequelNeeded: onSequelNeeded, onSequelAdvanced: onSequelAdvanced, onFinished: onFinished, from: sourceView)
+            }
+            return
+        }
+        // Settled — restore the full budget for the next launch.
+        presentRetriesRemaining = Self.maxPresentRetries
+
         self.sourceView = sourceView
 
         let playerView = PlayerView(
@@ -115,7 +158,12 @@ final class PlayerPresenter: ObservableObject {
         // PlayerHostingController returns the last landscape side, so iOS
         // will present the VC directly in that side.
         self.orientationLock = forceLandscape ? .landscape : .allButUpsideDown
-        trackedPlayerOrientation = preferredLandscape
+        // Seed the tracker with where the player will actually open. Seeding it with a landscape
+        // side unconditionally meant a player opened and closed in portrait (without ever
+        // rotating, so no orientation notification corrected it) looked landscape to
+        // dismissPlayer — which then skipped the dismiss animation and persisted a
+        // `lastLandscapeOrientation` the user never chose.
+        trackedPlayerOrientation = forceLandscape ? preferredLandscape : snapshotCurrentOrientation()
         startTrackingOrientation()
 
         topVC.present(hostingController, animated: true)
@@ -491,7 +539,7 @@ final class CastManager: NSObject, ObservableObject {
 
         let isHLS = url.pathExtension.lowercased() == "m3u8"
             || url.absoluteString.contains(".m3u8")
-        Logger.shared.log("[Cast] URL: \(url.absoluteString), isHLS: \(isHLS)", type: "Stream")
+        Logger.shared.log("[Cast] URL: \(Logger.redact(url)), isHLS: \(isHLS)", type: "Stream")
         let mediaInfoBuilder = GCKMediaInformationBuilder(contentURL: url)
         mediaInfoBuilder.streamType = isHLS ? .unknown : .buffered
         mediaInfoBuilder.contentType = isHLS ? "application/x-mpegURL" : "video/mp4"

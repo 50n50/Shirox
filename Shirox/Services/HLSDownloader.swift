@@ -35,7 +35,7 @@ actor HLSDownloader {
         downloadDir: URL,
         onProgress: @escaping @Sendable (Double) -> Void
     ) async throws -> String {
-        Logger.shared.log("[HLS] Downloading manifest: \(url)", type: "Download")
+        Logger.shared.log("[HLS] Downloading manifest: \(Logger.redact(url))", type: "Download")
 
         // 1. Resolve Master Playlist → highest-bandwidth media playlist.
         var manifest = try await fetchManifest(url: url, headers: headers)

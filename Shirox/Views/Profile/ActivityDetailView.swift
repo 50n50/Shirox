@@ -462,7 +462,14 @@ struct ActivityDetailView: View {
             try await AniListSocialService.shared.deleteActivity(id: activity.id)
             onDeleted?()
             dismiss()
-        } catch {}
+        } catch {
+            // Swallowing this made a failed delete look like a no-op: the sheet stayed put and
+            // the user just tapped Delete again. The reply path already restores + reports.
+            Logger.shared.log("[Social] Delete activity failed: \(error.localizedDescription)", type: "Error")
+            #if os(iOS)
+            ToastManager.shared.show(message: "Couldn't delete activity", type: .error)
+            #endif
+        }
     }
 
     private func performDeleteReply(_ reply: ActivityReply) async {
@@ -472,7 +479,13 @@ struct ActivityDetailView: View {
         do {
             try await AniListSocialService.shared.deleteReply(id: reply.id)
         } catch {
+            // The optimistic removal is rolled back, but without a message the reply just
+            // reappears with no explanation.
+            Logger.shared.log("[Social] Delete reply failed: \(error.localizedDescription)", type: "Error")
             withAnimation { replies = backup }
+            #if os(iOS)
+            ToastManager.shared.show(message: "Couldn't delete reply", type: .error)
+            #endif
         }
     }
 }

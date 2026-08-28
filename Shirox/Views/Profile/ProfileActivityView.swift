@@ -336,7 +336,13 @@ struct ProfileActivityView: View {
         do {
             try await AniListSocialService.shared.deleteActivity(id: item.id)
         } catch {
+            // The optimistic removal is rolled back, but the activity silently reappearing
+            // reads as a UI glitch rather than a failed delete.
+            Logger.shared.log("[Social] Delete activity failed: \(error.localizedDescription)", type: "Error")
             withAnimation { vm.activity = backup }
+            #if os(iOS)
+            ToastManager.shared.show(message: "Couldn't delete activity", type: .error)
+            #endif
         }
     }
 
@@ -344,9 +350,13 @@ struct ProfileActivityView: View {
         togglingIds.insert(item.id)
         let cur = likeOverrides[item.id] ?? (item.likeCount, item.isLiked)
         withAnimation {
-            likeOverrides[item.id] = (cur.liked ? cur.count - 1 : cur.count + 1, !cur.liked)
+            likeOverrides[item.id] = (cur.liked ? max(0, cur.count - 1) : cur.count + 1, !cur.liked)
         }
-        await vm.toggleLike(activityId: item.id, type: .activity)
+        // The override always wins for display, so a failed like would otherwise stay on screen
+        // as liked forever. Put it back the way the detail view does.
+        if await !vm.toggleLike(activityId: item.id, type: .activity) {
+            withAnimation { likeOverrides[item.id] = cur }
+        }
         togglingIds.remove(item.id)
     }
 }
