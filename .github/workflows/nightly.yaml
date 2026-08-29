@@ -3,20 +3,28 @@
 name: Build and upload nightly
 
 on:
- push:
-   branches:
-     - main
+  push:
+    branches:
+      - main
+    paths:
+      - 'Shirox/**'
+      - 'Shirox.xcodeproj/**'
+      - 'ShiroxTests/**'
+      # Optional:
+      - 'Configurations/**'
+      - 'buildipa.sh'
+      - 'buildcatalyst.sh'
 
 env:
- FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
- build-ios:
-   name: Build iOS IPA
-   runs-on: macos-26
-   permissions:
-     contents: write
-   steps:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
      - name: Checkout repository
        uses: actions/checkout@v6
 
