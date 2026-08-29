@@ -14,6 +14,7 @@ on:
       - 'Configurations/**'
       - 'buildipa.sh'
       - 'buildcatalyst.sh'
+      - 'builddmg.sh'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
