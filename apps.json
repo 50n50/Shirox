@@ -27,6 +27,15 @@
       },
       "versions": [
         {
+          "version": "1.0.5",
+          "buildVersion": "110",
+          "date": "2026-08-30",
+          "localizedDescription": "Casting holds a whole movie now. Chromecast and AirPlay sessions no longer drop partway through, seeking on a cast works, encrypted and fMP4 streams play to the end, and header-authenticated streams no longer land on a black screen. Skipping an episode or switching quality goes to the TV instead of the handset, and the lock screen controls follow whatever is actually playing.\n\nStreams that used to quietly never load are now detected and offer a retry instead of stalling on a spinner or a black frame. Tap the poster on any detail screen to open it full-size with pinch zoom, and long-press a title to copy it.\n\nPlus a wide bug audit: crashes in the Home carousel and the manga reader, manga chapters that finished downloading with pages missing, a reading position lost when the app is swiped away, pull-to-refresh on Browse, empty episode lists, subtitles using a tab before cue settings, AniList notifications that read just Activity instead of naming who liked or replied, and access tokens written into the exported log file.",
+          "downloadURL": "https://github.com/xibrox/Shirox/releases/download/beta/Shirox.ipa",
+          "size": 9370894,
+          "minOSVersion": "15.0"
+        },
+        {
           "version": "1.0.4",
           "buildVersion": "109",
           "date": "2026-08-29",
