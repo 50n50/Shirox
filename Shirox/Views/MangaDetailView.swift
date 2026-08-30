@@ -323,11 +323,15 @@ struct MangaDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        CachedAsyncImage(urlString: detail.image, contentMode: .fit)
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(detail.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .copyTitleContextMenu(detail.title)
 
                     if let module = ModuleManager.shared.activeModule {
                         HStack(spacing: 5) {
@@ -707,6 +711,12 @@ struct MangaDetailView: View {
     }
 
     private func openContinue(_ detail: MangaDetail) {
+        // Opening the reader with no chapters leaves it with nothing to display; the reader
+        // handles this as an error state, but there is no point pushing it in the first place.
+        guard !detail.chapters.isEmpty else {
+            ToastManager.shared.show(message: "No chapters found", type: .error)
+            return
+        }
         if let last = progress.lastRead(for: item.href),
            let idx = detail.chapters.firstIndex(where: { $0.href == last.chapterHref }) {
             readerContext = makeContext(

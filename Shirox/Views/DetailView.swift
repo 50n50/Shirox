@@ -879,11 +879,15 @@ struct DetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        CachedAsyncImage(urlString: item.image, contentMode: .fit)
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(item.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .copyTitleContextMenu(item.title)
 
                     // Module chip
                     let activeModule = ModuleManager.shared.activeModule
@@ -1145,6 +1149,22 @@ struct DetailView: View {
         }
     }
 
+    /// Episodes for the selected 100-episode range, with the index clamped to what this show
+    /// actually has. `selectedRangeIndex` is seeded in onAppear from a Continue Watching episode
+    /// number — before the episode list has loaded — so it can exceed the real count (absolute
+    /// numbering, a different module, a shorter list). The old inline clamping pinned startIndex
+    /// to `visibleEpisodes.count`, which yields an EMPTY slice; and since the range menu only
+    /// renders above 100 episodes, the user was left staring at an empty episode list with no
+    /// control to fix it.
+    private func episodesInSelectedRange(_ episodes: [EpisodeLink]) -> [EpisodeLink] {
+        guard !episodes.isEmpty else { return [] }
+        let maxRange = (episodes.count - 1) / 100
+        let rangeIdx = min(max(selectedRangeIndex, 0), maxRange)
+        let start = rangeIdx * 100
+        let end = min(start + 100, episodes.count)
+        return Array(episodes[start..<end])
+    }
+
     // MARK: - Episodes (Season & Range Menus with neutral styling)
     private func detectSeasons(_ episodes: [EpisodeLink]) -> [[EpisodeLink]] {
         guard !episodes.isEmpty else { return [] }
@@ -1276,8 +1296,13 @@ struct DetailView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "list.number")
                                     .font(.subheadline)
-                                let start = selectedRangeIndex * 100 + 1
-                                let end = min((selectedRangeIndex + 1) * 100, visibleEpisodes.count)
+                                // Same clamp as the list, so the button never advertises a range
+                                // different from the episodes actually shown.
+                                let shown = episodesInSelectedRange(visibleEpisodes)
+                                let maxRange = max(0, (visibleEpisodes.count - 1) / 100)
+                                let rangeIdx = min(max(selectedRangeIndex, 0), maxRange)
+                                let start = rangeIdx * 100 + 1
+                                let end = rangeIdx * 100 + shown.count
                                 Text("\(start)-\(end)")
                                     .font(.subheadline.weight(.medium))
                                 Image(systemName: "chevron.down")
@@ -1342,11 +1367,7 @@ struct DetailView: View {
             #if os(iOS)
             if isSelectionMode {
                 HStack {
-                    let currentRangeEpisodes: [EpisodeLink] = {
-                        let startIndex = max(0, min(selectedRangeIndex * 100, visibleEpisodes.count))
-                        let endIndex = max(startIndex, min(startIndex + 100, visibleEpisodes.count))
-                        return Array(visibleEpisodes[startIndex..<endIndex])
-                    }()
+                    let currentRangeEpisodes: [EpisodeLink] = episodesInSelectedRange(visibleEpisodes)
                     
                     let selectableEpisodes = currentRangeEpisodes.filter { ep in
                         let epNum = Int(ep.number)
@@ -1447,9 +1468,7 @@ struct DetailView: View {
                     .padding(.horizontal, 16)
             } else {
                 let displayedEpisodes: [EpisodeLink] = {
-                    let startIndex = max(0, min(selectedRangeIndex * 100, visibleEpisodes.count))
-                    let endIndex = max(startIndex, min(startIndex + 100, visibleEpisodes.count))
-                    let eps = Array(visibleEpisodes[startIndex..<endIndex])
+                    let eps = episodesInSelectedRange(visibleEpisodes)
                     return isReversed ? eps.reversed() : eps
                 }()
                 // How many times each episode number appears across the whole show — >1 means a

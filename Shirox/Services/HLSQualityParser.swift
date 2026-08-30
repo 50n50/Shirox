@@ -13,15 +13,15 @@ enum HLSQualityParser {
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
         guard let (data, response) = try? await URLSession.shared.data(for: request) else {
-            Logger.shared.log("[HLSQuality] Fetch failed for \(url.absoluteString)", type: "Error")
+            Logger.shared.log("[HLSQuality] Fetch failed for \(Logger.redact(url))", type: "Error")
             return []
         }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard let text = String(data: data, encoding: .utf8) else {
-            Logger.shared.log("[HLSQuality] Could not decode response (status=\(statusCode)) for \(url.absoluteString)", type: "Error")
+            Logger.shared.log("[HLSQuality] Could not decode response (status=\(statusCode)) for \(Logger.redact(url))", type: "Error")
             return []
         }
-        Logger.shared.log("[HLSQuality] Fetched \(data.count) bytes status=\(statusCode) isMaster=\(text.contains("#EXT-X-STREAM-INF")) url=\(url.absoluteString)", type: "Stream")
+        Logger.shared.log("[HLSQuality] Fetched \(data.count) bytes status=\(statusCode) isMaster=\(text.contains("#EXT-X-STREAM-INF")) url=\(Logger.redact(url))", type: "Stream")
         guard text.contains("#EXT-X-STREAM-INF") else { return [] }
 
         var levels: [HLSQualityLevel] = []

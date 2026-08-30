@@ -133,28 +133,48 @@ final class ModuleJSRunner {
             throw JSEngineError.functionNotFound(functionName)
         }
 
-        return try await withCheckedThrowingContinuation { cont in
-            let promise = fn.call(withArguments: args)
-            guard let promise, !promise.isUndefined, !promise.isNull else {
-                cont.resume(throwing: JSEngineError.nullResult)
-                return
-            }
+        // Bounded and resume-once for the same reasons as JSEngine.callAsyncJS: an untrusted
+        // module promise that never settles would otherwise suspend this continuation forever,
+        // and a thenable that fires both callbacks would resume it twice and trap.
+        let gate = ContinuationGate()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { cont in
+                gate.attach(cont)
+                let promise = fn.call(withArguments: args)
+                guard let promise, !promise.isUndefined, !promise.isNull else {
+                    gate.settle(.failure(JSEngineError.nullResult))
+                    return
+                }
 
-            let thenBlock: @convention(block) (JSValue) -> Void = { result in
-                DispatchQueue.main.async {
-                    cont.resume(returning: result.toString() ?? "")
+                // Synchronous module functions return a plain value rather than a Promise.
+                // JSEngine handles this; without the same guard here, invoking .then on a
+                // non-thenable threw inside JS and neither callback ever fired — so every
+                // caller of this runner (batch download, sequel resolution, the download
+                // module pickers) hung forever on modules that return a raw URL string.
+                let thenValue = promise.objectForKeyedSubscript("then")
+                if thenValue == nil || thenValue?.isUndefined == true {
+                    gate.settle(.success(promise.toString() ?? ""))
+                    return
+                }
+
+                let thenBlock: @convention(block) (JSValue) -> Void = { result in
+                    gate.settle(.success(result.toString() ?? ""))
+                }
+                let catchBlock: @convention(block) (JSValue) -> Void = { error in
+                    gate.settle(.failure(JSEngineError.jsError(error.toString() ?? "Unknown JS error")))
+                }
+
+                let thenFn = JSValue(object: thenBlock, in: ctx)
+                let catchFn = JSValue(object: catchBlock, in: ctx)
+                promise.invokeMethod("then", withArguments: [thenFn as Any])
+                promise.invokeMethod("catch", withArguments: [catchFn as Any])
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+                    gate.settle(.failure(JSEngineError.timedOut(functionName)))
                 }
             }
-            let catchBlock: @convention(block) (JSValue) -> Void = { error in
-                DispatchQueue.main.async {
-                    cont.resume(throwing: JSEngineError.jsError(error.toString() ?? "Unknown JS error"))
-                }
-            }
-
-            let thenFn = JSValue(object: thenBlock, in: ctx)
-            let catchFn = JSValue(object: catchBlock, in: ctx)
-            promise.invokeMethod("then", withArguments: [thenFn as Any])
-            promise.invokeMethod("catch", withArguments: [catchFn as Any])
+        } onCancel: {
+            gate.settle(.failure(CancellationError()))
         }
     }
 

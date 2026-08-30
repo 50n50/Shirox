@@ -91,7 +91,7 @@ final class AniListAuthManager: NSObject, ObservableObject {
             url: authURL,
             callbackURLScheme: "shirox"
         ) { [weak self] callbackURL, error in
-            Logger.shared.log("[AniList] callback fired — url: \(callbackURL?.absoluteString ?? "nil"), error: \(error?.localizedDescription ?? "nil")", type: "Debug")
+            Logger.shared.log("[AniList] callback fired — url: \(callbackURL.map { Logger.redact($0) } ?? "nil"), error: \(error?.localizedDescription ?? "nil")", type: "Debug")
             guard let self, let url = callbackURL, error == nil else { return }
             Task { @MainActor in self.handleCallback(url: url) }
         }
@@ -106,7 +106,7 @@ final class AniListAuthManager: NSObject, ObservableObject {
     }
 
     func handleCallback(url: URL) {
-        Logger.shared.log("[AniList] handleCallback url: \(url.absoluteString)", type: "Debug")
+        Logger.shared.log("[AniList] handleCallback url: \(Logger.redact(url))", type: "Debug")
         // Implicit flow returns token in fragment: shirox://auth#access_token=...
         guard let fragment = url.fragment else {
             Logger.shared.log("[AniList] handleCallback: no fragment in URL", type: "Error")

@@ -77,13 +77,13 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Request background task to keep casting alive while screen is locked
-        #if canImport(GoogleCast)
-        let bgTask = application.beginBackgroundTask { }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 27) {
-            application.endBackgroundTask(bgTask)
-        }
-        #endif
+        // Background execution during a cast is held by BackgroundKeepAlive (the `audio`
+        // exemption) and CastProxyServer's own assertion, both scoped to an actual session.
+        //
+        // What used to be here took an unconditional assertion on every backgrounding with
+        // an EMPTY expiration handler and ended it 27s later on a timer. An assertion whose
+        // handler doesn't end it is a watchdog termination if it ever expires first, and
+        // taking one when nothing is casting just burns the app's budget.
     }
 
     private func configureURLSession() {

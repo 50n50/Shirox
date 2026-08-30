@@ -35,6 +35,7 @@ struct ActivityFetchView: View {
 struct NotificationsView: View {
     @ObservedObject var vm: ProfileViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -117,6 +118,11 @@ struct NotificationsView: View {
                                     notificationRow(notif)
                                 }
                                 .buttonStyle(.plain)
+                            } else if let url = notif.kind.externalURL {
+                                Button { openURL(url) } label: {
+                                    notificationRow(notif)
+                                }
+                                .buttonStyle(.plain)
                             } else {
                                 notificationRow(notif)
                             }
@@ -193,6 +199,10 @@ struct NotificationsView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2).foregroundStyle(.tertiary)
                     .padding(.top, 4)
+            } else if notif.kind.externalURL != nil {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(.top, 4)
             }
         }
         .padding(10)
@@ -206,9 +216,16 @@ struct NotificationsView: View {
             Text("\(mediaTitle ?? "Anime") ").bold() + Text("episode \(episode) aired")
         case .following(_, let userName, _):
             Text(userName ?? "Someone").bold() + Text(" followed you")
-        case .activityMessage(_, let context, _), .activityReply(_, let context, _),
-             .activityMention(_, let context, _), .activityLike(_, let context, _):
-            Text("Activity ") + Text(context ?? "")
+        case .activityMessage(_, let userName, let context, _), .activityReply(_, let userName, let context, _),
+             .activityMention(_, let userName, let context, _), .activityLike(_, let userName, let context, _):
+            sentenceText(NotificationSentence(userName: userName, context: context,
+                                              fallbackAction: "interacted with your activity"))
+        case .threadComment(let threadTitle, _, let userName, let context, _):
+            sentenceText(NotificationSentence(userName: userName, context: context,
+                                              fallbackAction: "commented in", objectTitle: threadTitle))
+        case .threadLike(let threadTitle, _, let userName, let context, _):
+            sentenceText(NotificationSentence(userName: userName, context: context,
+                                              fallbackAction: "liked your post in", objectTitle: threadTitle))
         case .mediaChange(let title, let context, _, _):
             if let title, !title.isEmpty {
                 Text(title).bold() + Text(context ?? " was recently added to the site.")
@@ -220,12 +237,18 @@ struct NotificationsView: View {
         }
     }
 
+    private func sentenceText(_ sentence: NotificationSentence) -> Text {
+        let opening = Text(sentence.subject).bold() + Text(" \(sentence.action)")
+        guard let object = sentence.object else { return opening }
+        return opening + Text(" ") + Text(object).bold()
+    }
+
     private func isTappable(_ notif: ProviderNotification) -> Bool {
         switch notif.kind {
         case .airing(_, _, let mediaId, _):
             return mediaId != 0
-        case .activityMessage(let id, _, _), .activityReply(let id, _, _),
-             .activityMention(let id, _, _), .activityLike(let id, _, _):
+        case .activityMessage(let id, _, _, _), .activityReply(let id, _, _, _),
+             .activityMention(let id, _, _, _), .activityLike(let id, _, _, _):
             return id != nil
         case .mediaChange(_, _, _, let mediaId):
             return mediaId != nil
@@ -239,8 +262,8 @@ struct NotificationsView: View {
         switch notif.kind {
         case .airing(_, _, let mediaId, _):
             AniListDetailView(mediaId: mediaId, preloadedMedia: nil)
-        case .activityMessage(let activityId, _, _), .activityReply(let activityId, _, _),
-             .activityMention(let activityId, _, _), .activityLike(let activityId, _, _):
+        case .activityMessage(let activityId, _, _, _), .activityReply(let activityId, _, _, _),
+             .activityMention(let activityId, _, _, _), .activityLike(let activityId, _, _, _):
             if let id = activityId { ActivityFetchView(activityId: id) }
         case .mediaChange(_, _, _, let mediaId):
             if let id = mediaId { AniListDetailView(mediaId: id, preloadedMedia: nil) }
@@ -256,6 +279,8 @@ struct NotificationsView: View {
         case .activityMessage: return ("envelope", .purple)
         case .activityReply, .activityMention: return ("bubble.left", .orange)
         case .activityLike: return ("heart.fill", .pink)
+        case .threadComment: return ("text.bubble", .indigo)
+        case .threadLike: return ("heart.fill", .pink)
         case .mediaChange: return ("arrow.triangle.2.circlepath", .gray)
         case .unknown: return ("bell", .gray)
         }

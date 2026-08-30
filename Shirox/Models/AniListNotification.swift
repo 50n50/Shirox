@@ -82,7 +82,14 @@ struct ThreadGenericNotification: Codable {
     let id: Int
     let context: String?
     let user: ActivityUser?
+    let thread: ActivityThread?
     let createdAt: Int
+}
+
+struct ActivityThread: Codable {
+    let id: Int
+    let title: String?
+    let siteUrl: String?
 }
 
 struct MediaGenericNotification: Codable {

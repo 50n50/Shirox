@@ -215,19 +215,26 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func toggleLike(activityId: Int, type: LikeableType) async {
+    /// Returns true when the like was actually applied, so an optimistic UI update can be rolled
+    /// back if it wasn't. Without this the caller's override stuck: a rejected like kept showing
+    /// as liked until the next reload, with no like on the server.
+    @discardableResult
+    func toggleLike(activityId: Int, type: LikeableType) async -> Bool {
         do {
             let isLiked = try await ProviderManager.shared.call {
                 try await $0.toggleLike(id: activityId, type: type)
             }
             if let index = activity.firstIndex(where: { $0.id == activityId }) {
                 activity[index].isLiked = isLiked
-                activity[index].likeCount += isLiked ? 1 : -1
+                activity[index].likeCount = max(0, activity[index].likeCount + (isLiked ? 1 : -1))
             }
+            return true
         } catch ProviderError.unsupported {
             // MAL doesn't support likes — silently ignore
+            return false
         } catch {
             self.error = error.localizedDescription
+            return false
         }
     }
 

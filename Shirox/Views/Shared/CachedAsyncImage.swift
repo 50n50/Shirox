@@ -18,6 +18,9 @@ typealias PlatformImage = NSImage
 struct CachedAsyncImage: View {
     let urlString: String
     var base64String: String? = nil
+    /// `.fill` (the default) crops to fill its frame — what every thumbnail and
+    /// hero wants. `.fit` shows the whole image uncropped, for the full-poster viewer.
+    var contentMode: SwiftUI.ContentMode = .fill
     @State private var platformImage: PlatformImage?
     @State private var loadFailed = false
     @State private var reloadToken = 0
@@ -65,28 +68,29 @@ struct CachedAsyncImage: View {
         NotificationCenter.default.post(name: NSNotification.Name("ClearImageCache"), object: nil)
     }
 
+    /// The one place that bridges `PlatformImage` into SwiftUI's `Image`.
+    private static func image(from platformImage: PlatformImage) -> Image {
+        #if os(macOS)
+        Image(nsImage: platformImage)
+        #else
+        Image(uiImage: platformImage)
+        #endif
+    }
+
     var body: some View {
         Group {
             if let displayImage = platformImage {
-                #if os(iOS)
-                Image(uiImage: displayImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(minWidth: 0, minHeight: 0)
-                    .clipped()
-                #elseif os(tvOS)
-                Image(uiImage: displayImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(minWidth: 0, minHeight: 0)
-                    .clipped()
-                #else
-                Image(nsImage: displayImage)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(minWidth: 0, minHeight: 0)
-                    .clipped()
-                #endif
+                if contentMode == .fill {
+                    Self.image(from: displayImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(minWidth: 0, minHeight: 0)
+                        .clipped()
+                } else {
+                    Self.image(from: displayImage)
+                        .resizable()
+                        .scaledToFit()
+                }
             } else if loadFailed {
                 Rectangle().fill(Color.gray.opacity(0.3))
                     .overlay(
@@ -282,6 +286,7 @@ struct CachedAsyncImage: View {
 struct TVDBPosterImage: View {
     let media: Media
     var type: TVDBArtworkType = .poster
+    var contentMode: SwiftUI.ContentMode = .fill
     // Only used for AniList async TVDB lookup
     @State private var tvdbURL: String?
 
@@ -302,13 +307,14 @@ struct TVDBPosterImage: View {
         return cachedURL ?? providerFallback
     }
 
-    init(media: Media, type: TVDBArtworkType = .poster) {
+    init(media: Media, type: TVDBArtworkType = .poster, contentMode: SwiftUI.ContentMode = .fill) {
         self.media = media
         self.type = type
+        self.contentMode = contentMode
     }
 
     var body: some View {
-        CachedAsyncImage(urlString: tvdbURL ?? immediateURL)
+        CachedAsyncImage(urlString: tvdbURL ?? immediateURL, contentMode: contentMode)
             .task(id: media.uniqueId) {
                 if let url = tvdbURL, !url.isEmpty { return }
                 let artwork = await TVDBMappingService.shared.getArtwork(for: media.id, provider: media.provider)

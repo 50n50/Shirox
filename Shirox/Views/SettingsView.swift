@@ -788,6 +788,35 @@ class Logger: @unchecked Sendable {
         logFileURL = documentDirectory.appendingPathComponent("logs.txt")
     }
     
+    /// Query/fragment keys whose values must never reach the log file.
+    private static let sensitiveURLKeys: Set<String> = [
+        "access_token", "refresh_token", "id_token", "token", "api_key", "apikey",
+        "code", "client_secret", "password", "x-emby-token"
+    ]
+
+    /// Marker substituted for redacted values. Deliberately free of characters that URL
+    /// serialization would percent-encode, so the marker stays readable in the log.
+    static let redactionMarker = "REDACTED"
+
+    /// URL rendered safe for the log file: sensitive query values and any fragment are replaced
+    /// with `redactionMarker`. These logs are written to logs.txt and exported from Settings → App Logs,
+    /// which is what users paste into bug reports — so a stream URL carrying a Jellyfin `api_key`,
+    /// or an OAuth callback carrying `#access_token=…`, must not be written verbatim.
+    static func redact(_ url: URL) -> String {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return "\(url.scheme ?? "?")://\(url.host ?? "?")/\(redactionMarker)"
+        }
+        if let items = comps.queryItems {
+            comps.queryItems = items.map { item in
+                sensitiveURLKeys.contains(item.name.lowercased())
+                    ? URLQueryItem(name: item.name, value: redactionMarker)
+                    : item
+            }
+        }
+        if comps.fragment != nil { comps.fragment = redactionMarker }
+        return comps.string ?? "\(url.scheme ?? "?")://\(url.host ?? "?")\(url.path)"
+    }
+
     func log(_ message: String, type: String = "General") {
         guard logFilterViewModel.isFilterEnabled(for: type) else { return }
         

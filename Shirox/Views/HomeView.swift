@@ -145,7 +145,12 @@ private struct FeaturedCarousel: View {
             : UIScreen.main.bounds.height - 140
 
         let displayItems = realItems
-        let currentMedia = displayItems.isEmpty ? items[0] : displayItems[currentIndex]
+        // `displayItems` is `items.prefix(8)`, so it is empty exactly when `items` is — the old
+        // `displayItems.isEmpty ? items[0] : …` indexed the empty array in precisely the case it
+        // was guarding against. SwiftUI can still evaluate this body once with an emptied
+        // `items` while the parent's `if !vm.trending.isEmpty` is being torn down, which crashed
+        // the Home tab whenever trending went from populated to empty (failed refresh, offline).
+        let currentMedia = displayItems.indices.contains(currentIndex) ? displayItems[currentIndex] : nil
 
         VStack(spacing: 0) {
             ZStack {
@@ -222,52 +227,54 @@ private struct FeaturedCarousel: View {
                     .frame(height: 360)
                     .allowsHitTesting(false)
 
-                    VStack(spacing: 10) {
-                        if let genres = currentMedia.genres, !genres.isEmpty {
-                            HStack(spacing: 6) {
-                                ForEach(genres.prefix(3), id: \.self) { g in
-                                    Text(g)
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(Color.primary.opacity(0.1), in: Capsule())
-                                        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
+                    if let currentMedia {
+                        VStack(spacing: 10) {
+                            if let genres = currentMedia.genres, !genres.isEmpty {
+                                HStack(spacing: 6) {
+                                    ForEach(genres.prefix(3), id: \.self) { g in
+                                        Text(g)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(Color.primary.opacity(0.1), in: Capsule())
+                                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
+                                    }
                                 }
                             }
-                        }
 
-                        Text(currentMedia.title.displayTitle)
-                            .font(.title2.weight(.bold))
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-
-                        if let desc = currentMedia.plainDescription, !desc.isEmpty {
-                            Text(String(desc.prefix(120)) + (desc.count > 120 ? "…" : ""))
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                            Text(currentMedia.title.displayTitle)
+                                .font(.title2.weight(.bold))
+                                .foregroundStyle(.primary)
                                 .multilineTextAlignment(.center)
                                 .lineLimit(2)
-                                .padding(.horizontal, 8)
-                        }
 
-                        NavigationLink {
-                            AniListDetailView(mediaId: currentMedia.id, preloadedMedia: currentMedia)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "play.fill").font(.footnote.weight(.semibold))
-                                Text("Watch").fontWeight(.semibold)
+                            if let desc = currentMedia.plainDescription, !desc.isEmpty {
+                                Text(String(desc.prefix(120)) + (desc.count > 120 ? "…" : ""))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                                    .padding(.horizontal, 8)
                             }
-                            .foregroundStyle(platformBackground)
-                            .frame(width: 130, height: 42)
-                            .background(Color.primary, in: RoundedRectangle(cornerRadius: 12))
+
+                            NavigationLink {
+                                AniListDetailView(mediaId: currentMedia.id, preloadedMedia: currentMedia)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill").font(.footnote.weight(.semibold))
+                                    Text("Watch").fontWeight(.semibold)
+                                }
+                                .foregroundStyle(platformBackground)
+                                .frame(width: 130, height: 42)
+                                .background(Color.primary, in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 18)
                 }
             }
 

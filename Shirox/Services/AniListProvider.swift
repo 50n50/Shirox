@@ -270,23 +270,35 @@ final class AniListProvider: MediaProvider {
                 createdAt: f.createdAt)
         case .activityMessage(let n):
             return ProviderNotification(id: n.id,
-                kind: .activityMessage(activityId: n.activityId, context: n.context,
+                kind: .activityMessage(activityId: n.activityId, userName: n.user?.name, context: n.context,
                                        avatarURL: n.user?.avatar?.large),
                 createdAt: n.createdAt)
         case .activityReply(let n), .activityReplySubscribed(let n):
             return ProviderNotification(id: n.id,
-                kind: .activityReply(activityId: n.activityId, context: n.context,
+                kind: .activityReply(activityId: n.activityId, userName: n.user?.name, context: n.context,
                                      avatarURL: n.user?.avatar?.large),
                 createdAt: n.createdAt)
         case .activityMention(let n):
             return ProviderNotification(id: n.id,
-                kind: .activityMention(activityId: n.activityId, context: n.context,
+                kind: .activityMention(activityId: n.activityId, userName: n.user?.name, context: n.context,
                                        avatarURL: n.user?.avatar?.large),
                 createdAt: n.createdAt)
         case .activityLike(let n), .activityReplyLike(let n):
             return ProviderNotification(id: n.id,
-                kind: .activityLike(activityId: n.activityId, context: n.context,
+                kind: .activityLike(activityId: n.activityId, userName: n.user?.name, context: n.context,
                                     avatarURL: n.user?.avatar?.large),
+                createdAt: n.createdAt)
+        case .threadCommentMention(let n), .threadCommentReply(let n), .threadCommentSubscribed(let n):
+            return ProviderNotification(id: n.id,
+                kind: .threadComment(threadTitle: n.thread?.title, threadURL: n.thread?.siteUrl,
+                                     userName: n.user?.name, context: n.context,
+                                     avatarURL: n.user?.avatar?.large),
+                createdAt: n.createdAt)
+        case .threadCommentLike(let n), .threadLike(let n):
+            return ProviderNotification(id: n.id,
+                kind: .threadLike(threadTitle: n.thread?.title, threadURL: n.thread?.siteUrl,
+                                  userName: n.user?.name, context: n.context,
+                                  avatarURL: n.user?.avatar?.large),
                 createdAt: n.createdAt)
         case .mediaDataChange(let n), .mediaMerge(let n), .mediaAddition(let n):
             return ProviderNotification(id: n.id,
