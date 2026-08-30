@@ -296,6 +296,7 @@ final class AniListSocialService {
             let deletedMediaTitle: String?
             let user: ActivityUser?
             let media: ActivityMedia?
+            let thread: ActivityThread?
             let createdAt: Int?
         }
 
@@ -324,11 +325,11 @@ final class AniListSocialService {
               ... on ActivityMentionNotification { id context activityId createdAt user { id name avatar { large } } }
               ... on ActivityLikeNotification { id context activityId createdAt user { id name avatar { large } } }
               ... on ActivityReplyLikeNotification { id context activityId createdAt user { id name avatar { large } } }
-              ... on ThreadCommentMentionNotification { id context createdAt user { id name avatar { large } } }
-              ... on ThreadCommentReplyNotification { id context createdAt user { id name avatar { large } } }
-              ... on ThreadCommentSubscribedNotification { id context createdAt user { id name avatar { large } } }
-              ... on ThreadCommentLikeNotification { id context createdAt user { id name avatar { large } } }
-              ... on ThreadLikeNotification { id context createdAt user { id name avatar { large } } }
+              ... on ThreadCommentMentionNotification { id context createdAt user { id name avatar { large } } thread { id title siteUrl } }
+              ... on ThreadCommentReplyNotification { id context createdAt user { id name avatar { large } } thread { id title siteUrl } }
+              ... on ThreadCommentSubscribedNotification { id context createdAt user { id name avatar { large } } thread { id title siteUrl } }
+              ... on ThreadCommentLikeNotification { id context createdAt user { id name avatar { large } } thread { id title siteUrl } }
+              ... on ThreadLikeNotification { id context createdAt user { id name avatar { large } } thread { id title siteUrl } }
               ... on RelatedMediaAdditionNotification { id context createdAt media { id title { romaji english } coverImage { large } } }
               ... on MediaDataChangeNotification { id context reason createdAt media { id title { romaji english } coverImage { large } } }
               ... on MediaMergeNotification { id context reason createdAt media { id title { romaji english } coverImage { large } } }
@@ -361,15 +362,15 @@ final class AniListSocialService {
             case "ActivityReplyLikeNotification":
                 return .activityReplyLike(ActivityGenericNotification(id: id, context: raw.context, activityId: raw.activityId, user: raw.user, createdAt: createdAt))
             case "ThreadCommentMentionNotification":
-                return .threadCommentMention(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, createdAt: createdAt))
+                return .threadCommentMention(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, thread: raw.thread, createdAt: createdAt))
             case "ThreadCommentReplyNotification":
-                return .threadCommentReply(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, createdAt: createdAt))
+                return .threadCommentReply(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, thread: raw.thread, createdAt: createdAt))
             case "ThreadCommentSubscribedNotification":
-                return .threadCommentSubscribed(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, createdAt: createdAt))
+                return .threadCommentSubscribed(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, thread: raw.thread, createdAt: createdAt))
             case "ThreadCommentLikeNotification":
-                return .threadCommentLike(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, createdAt: createdAt))
+                return .threadCommentLike(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, thread: raw.thread, createdAt: createdAt))
             case "ThreadLikeNotification":
-                return .threadLike(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, createdAt: createdAt))
+                return .threadLike(ThreadGenericNotification(id: id, context: raw.context, user: raw.user, thread: raw.thread, createdAt: createdAt))
             case "RelatedMediaAdditionNotification":
                 return .mediaAddition(MediaGenericNotification(id: id,
                     context: raw.context, reason: nil, media: raw.media, createdAt: createdAt))

@@ -288,6 +288,18 @@ final class AniListProvider: MediaProvider {
                 kind: .activityLike(activityId: n.activityId, userName: n.user?.name, context: n.context,
                                     avatarURL: n.user?.avatar?.large),
                 createdAt: n.createdAt)
+        case .threadCommentMention(let n), .threadCommentReply(let n), .threadCommentSubscribed(let n):
+            return ProviderNotification(id: n.id,
+                kind: .threadComment(threadTitle: n.thread?.title, threadURL: n.thread?.siteUrl,
+                                     userName: n.user?.name, context: n.context,
+                                     avatarURL: n.user?.avatar?.large),
+                createdAt: n.createdAt)
+        case .threadCommentLike(let n), .threadLike(let n):
+            return ProviderNotification(id: n.id,
+                kind: .threadLike(threadTitle: n.thread?.title, threadURL: n.thread?.siteUrl,
+                                  userName: n.user?.name, context: n.context,
+                                  avatarURL: n.user?.avatar?.large),
+                createdAt: n.createdAt)
         case .mediaDataChange(let n), .mediaMerge(let n), .mediaAddition(let n):
             return ProviderNotification(id: n.id,
                 kind: .mediaChange(title: n.media?.displayTitle, context: n.context,

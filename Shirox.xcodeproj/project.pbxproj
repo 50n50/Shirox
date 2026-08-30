@@ -477,6 +477,7 @@
 		5EA50C4C1700000000000016 /* CastSessionRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4C1700000000000015 /* CastSessionRecoveryTests.swift */; };
 		5EA50C4C1700000000000018 /* AirPlayRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4C1700000000000017 /* AirPlayRoutingTests.swift */; };
 		5EA50C4D170000000000A2 /* CastSessionListenerSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4D170000000000A1 /* CastSessionListenerSelectorTests.swift */; };
+		5EA50C4F1700000000000002 /* NotificationSentenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4F1700000000000001 /* NotificationSentenceTests.swift */; };
 		5EA50C4E1700000000000002 /* PlaybackRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4E1700000000000001 /* PlaybackRouting.swift */; };
 		5EA50C4E1700000000000003 /* PlaybackRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4E1700000000000001 /* PlaybackRouting.swift */; };
 		5EA50C4E1700000000000004 /* PlaybackRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA50C4E1700000000000001 /* PlaybackRouting.swift */; };
@@ -822,6 +823,7 @@
 		5EA50C4C1700000000000015 /* CastSessionRecoveryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CastSessionRecoveryTests.swift; sourceTree = "<group>"; };
 		5EA50C4C1700000000000017 /* AirPlayRoutingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AirPlayRoutingTests.swift; sourceTree = "<group>"; };
 		5EA50C4D170000000000A1 /* CastSessionListenerSelectorTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CastSessionListenerSelectorTests.swift; sourceTree = "<group>"; };
+		5EA50C4F1700000000000001 /* NotificationSentenceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationSentenceTests.swift; sourceTree = "<group>"; };
 		5EA50C4E1700000000000001 /* PlaybackRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackRouting.swift; sourceTree = "<group>"; };
 		5EA50C4E1700000000000005 /* RemoteCommandCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCommandCoordinator.swift; sourceTree = "<group>"; };
 		5EA50C4E1700000000000009 /* PlaybackRoutingTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PlaybackRoutingTests.swift; sourceTree = "<group>"; };
@@ -1246,6 +1248,7 @@
 				5EA50C4E1700000000000009 /* PlaybackRoutingTests.swift */,
 				5EA50C4E170000000000000B /* RemoteCommandCoordinatorTests.swift */,
 				5EA50C4D170000000000A1 /* CastSessionListenerSelectorTests.swift */,
+				5EA50C4F1700000000000001 /* NotificationSentenceTests.swift */,
 				5EA50C4C1700000000000011 /* CastManifestRewriterTests.swift */,
 				5EA50C4C1700000000000013 /* HTTPRequestHeadTests.swift */,
 				5EA50C4C1700000000000015 /* CastSessionRecoveryTests.swift */,
@@ -1500,6 +1503,7 @@
 				5EA50C4E170000000000000A /* PlaybackRoutingTests.swift in Sources */,
 				5EA50C4E170000000000000C /* RemoteCommandCoordinatorTests.swift in Sources */,
 				5EA50C4D170000000000A2 /* CastSessionListenerSelectorTests.swift in Sources */,
+				5EA50C4F1700000000000002 /* NotificationSentenceTests.swift in Sources */,
 				5EA50C4C1700000000000012 /* CastManifestRewriterTests.swift in Sources */,
 				5EA50C4C1700000000000014 /* HTTPRequestHeadTests.swift in Sources */,
 				5EA50C4C1700000000000016 /* CastSessionRecoveryTests.swift in Sources */,
