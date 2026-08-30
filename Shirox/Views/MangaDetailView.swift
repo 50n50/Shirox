@@ -323,11 +323,15 @@ struct MangaDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        CachedAsyncImage(urlString: detail.image, contentMode: .fit)
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(detail.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .copyTitleContextMenu(detail.title)
 
                     if let module = ModuleManager.shared.activeModule {
                         HStack(spacing: 5) {

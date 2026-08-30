@@ -919,11 +919,15 @@ struct AniListDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        TVDBPosterImage(media: media, contentMode: .fit)
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(media.title.displayTitle)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .copyTitleContextMenu(media.title.displayTitle)
 
                     HStack(spacing: 8) {
                         if let score = media.averageScore {

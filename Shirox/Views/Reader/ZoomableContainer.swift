@@ -10,9 +10,16 @@ import UIKit
 struct ZoomableContainer<Content: View>: UIViewRepresentable {
     let content: Content
     let onSingleTap: () -> Void
+    /// Fires with the live zoom scale whenever it changes. The poster viewer uses
+    /// this to suspend its drag-to-dismiss while zoomed in, so the two pans don't
+    /// fight. Defaults to a no-op, leaving the reader's behaviour unchanged.
+    let onZoomChange: (CGFloat) -> Void
 
-    init(onSingleTap: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+    init(onSingleTap: @escaping () -> Void,
+         onZoomChange: @escaping (CGFloat) -> Void = { _ in },
+         @ViewBuilder content: () -> Content) {
         self.onSingleTap = onSingleTap
+        self.onZoomChange = onZoomChange
         self.content = content()
     }
 
@@ -56,20 +63,29 @@ struct ZoomableContainer<Content: View>: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIScrollView, context: Context) {
         context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onZoomChange = onZoomChange
         context.coordinator.host?.rootView = content
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSingleTap: onSingleTap) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSingleTap: onSingleTap, onZoomChange: onZoomChange)
+    }
 
     final class Coordinator: NSObject, UIScrollViewDelegate {
         var host: UIHostingController<Content>?
         var onSingleTap: () -> Void
+        var onZoomChange: (CGFloat) -> Void
 
-        init(onSingleTap: @escaping () -> Void) {
+        init(onSingleTap: @escaping () -> Void, onZoomChange: @escaping (CGFloat) -> Void) {
             self.onSingleTap = onSingleTap
+            self.onZoomChange = onZoomChange
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { host?.view }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            onZoomChange(scrollView.zoomScale)
+        }
 
         @objc func handleSingleTap() { onSingleTap() }
 

@@ -879,11 +879,15 @@ struct DetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
+                    .expandablePoster {
+                        CachedAsyncImage(urlString: item.image, contentMode: .fit)
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(item.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .copyTitleContextMenu(item.title)
 
                     // Module chip
                     let activeModule = ModuleManager.shared.activeModule
