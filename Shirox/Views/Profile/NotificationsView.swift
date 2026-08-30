@@ -206,9 +206,9 @@ struct NotificationsView: View {
             Text("\(mediaTitle ?? "Anime") ").bold() + Text("episode \(episode) aired")
         case .following(_, let userName, _):
             Text(userName ?? "Someone").bold() + Text(" followed you")
-        case .activityMessage(_, let context, _), .activityReply(_, let context, _),
-             .activityMention(_, let context, _), .activityLike(_, let context, _):
-            Text("Activity ") + Text(context ?? "")
+        case .activityMessage(_, let userName, let context, _), .activityReply(_, let userName, let context, _),
+             .activityMention(_, let userName, let context, _), .activityLike(_, let userName, let context, _):
+            activityText(userName: userName, context: context)
         case .mediaChange(let title, let context, _, _):
             if let title, !title.isEmpty {
                 Text(title).bold() + Text(context ?? " was recently added to the site.")
@@ -220,12 +220,22 @@ struct NotificationsView: View {
         }
     }
 
+    // AniList sends contexts like " liked your activity", written to follow the
+    // username. Joining them keeps the sentence whole whether or not the API's
+    // leading space is there.
+    private func activityText(userName: String?, context: String?) -> Text {
+        let name = Text(userName ?? "Someone").bold()
+        let action = (context ?? "").trimmingCharacters(in: .whitespaces)
+        guard !action.isEmpty else { return name + Text(" interacted with your activity") }
+        return name + Text(" \(action)")
+    }
+
     private func isTappable(_ notif: ProviderNotification) -> Bool {
         switch notif.kind {
         case .airing(_, _, let mediaId, _):
             return mediaId != 0
-        case .activityMessage(let id, _, _), .activityReply(let id, _, _),
-             .activityMention(let id, _, _), .activityLike(let id, _, _):
+        case .activityMessage(let id, _, _, _), .activityReply(let id, _, _, _),
+             .activityMention(let id, _, _, _), .activityLike(let id, _, _, _):
             return id != nil
         case .mediaChange(_, _, _, let mediaId):
             return mediaId != nil
@@ -239,8 +249,8 @@ struct NotificationsView: View {
         switch notif.kind {
         case .airing(_, _, let mediaId, _):
             AniListDetailView(mediaId: mediaId, preloadedMedia: nil)
-        case .activityMessage(let activityId, _, _), .activityReply(let activityId, _, _),
-             .activityMention(let activityId, _, _), .activityLike(let activityId, _, _):
+        case .activityMessage(let activityId, _, _, _), .activityReply(let activityId, _, _, _),
+             .activityMention(let activityId, _, _, _), .activityLike(let activityId, _, _, _):
             if let id = activityId { ActivityFetchView(activityId: id) }
         case .mediaChange(_, _, _, let mediaId):
             if let id = mediaId { AniListDetailView(mediaId: id, preloadedMedia: nil) }
