@@ -62,7 +62,7 @@ jobs:
          git add apps.json
          git diff --cached --quiet || (git commit -m "chore: update apps.json [skip ci]" && git push origin HEAD:main)
 
- build-catalyst:
+  build-catalyst:
    name: Build Mac Catalyst DMG
    runs-on: macos-26
    permissions:
