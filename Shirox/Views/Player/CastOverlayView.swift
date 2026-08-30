@@ -5,6 +5,11 @@ struct CastOverlayView: View {
     let episodeNumber: Int?
     let imageUrl: String?
     let deviceName: String
+    /// The session is temporarily on hold (backgrounding, a network blip) and the SDK is
+    /// trying to get it back. Shown rather than hidden: the transport controls genuinely
+    /// don't work in this state, and silently ignoring taps is what made the old stuck
+    /// cast screen feel broken.
+    var isReconnecting: Bool = false
     let onDismiss: () -> Void
     @AppStorage("playerLiquidGlass") private var playerLiquidGlass = true
 
@@ -67,10 +72,18 @@ struct CastOverlayView: View {
                 }
 
                 HStack(spacing: 6) {
-                    Image(systemName: "tv.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Playing on \(deviceName)")
-                        .font(.caption.weight(.semibold))
+                    if isReconnecting {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white)
+                        Text("Reconnecting to \(deviceName)…")
+                            .font(.caption.weight(.semibold))
+                    } else {
+                        Image(systemName: "tv.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Playing on \(deviceName)")
+                            .font(.caption.weight(.semibold))
+                    }
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)

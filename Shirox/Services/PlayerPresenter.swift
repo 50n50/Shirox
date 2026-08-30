@@ -361,18 +361,43 @@ final class PlayerPresenter: ObservableObject {
 
 // MARK: - Cast Manager
 
+/// Everything the app needs to load onto a receiver, kept so a session that comes back
+/// after a suspend can be re-populated without the player having to re-derive it.
+struct CastMediaRequest: Equatable {
+    var url: URL
+    var title: String
+    var posterUrl: String?
+    var subtitleURL: URL?
+    var startTime: Double
+}
+
 @MainActor
 final class CastManager: NSObject, ObservableObject {
     static let shared = CastManager()
-    
-    @Published var isConnected = false
+
+    @Published private(set) var outcome: CastSessionOutcome = .disconnected
     @Published var currentDeviceName: String?
     @Published var isPlaying = false
     @Published var currentPosition: Double = 0
     @Published var duration: Double = 0
-    
+    /// Set when a cast ends abnormally, so the player can tell the user why the movie just
+    /// came back to the phone instead of silently swapping under them.
+    @Published var lastError: String?
+
+    /// Whether the UI should present itself as casting. Stays true through a suspend —
+    /// the SDK usually recovers it, and bouncing to the local player on every screen lock
+    /// would be worse than a second of dead controls.
+    var isConnected: Bool { outcome.isConnected }
+
     private var progressTimer: Timer?
-    private var volumeObserver: NSKeyValueObservation?
+    /// The media currently on (or intended for) the receiver.
+    private var pendingRequest: CastMediaRequest?
+    #if canImport(GoogleCast)
+    /// The client we registered on, so the listener can be removed again. Registering
+    /// without ever removing used to stack a fresh listener per session — by the third
+    /// cast every status update was handled three times.
+    private weak var observedClient: GCKRemoteMediaClient?
+    #endif
 
     private override init() {
         super.init()
@@ -380,48 +405,122 @@ final class CastManager: NSObject, ObservableObject {
         setupCast()
         #endif
     }
-    
+
     private func setupCast() {
         #if canImport(GoogleCast)
         let criteria = GCKDiscoveryCriteria(applicationID: kGCKDefaultMediaReceiverApplicationID)
         let options = GCKCastOptions(discoveryCriteria: criteria)
+
+        // THE BUG: this defaults to true, so the SDK tore the session down every time the
+        // app was backgrounded — a screen lock mid-movie — and tried to rebuild it on
+        // return. Each of those round trips was a chance to land in the broken state below.
+        // The app already holds itself alive during a cast (BackgroundKeepAlive + the proxy's
+        // background task), so the session can simply stay up.
+        options.suspendSessionsWhenBackgrounded = false
+
+        // Let the SDK map the hardware volume keys to the receiver. The app used to do this
+        // by KVO-ing AVAudioSession.outputVolume, which fights the SDK's own handling and
+        // sends a duplicate volume command per keypress.
+        options.physicalVolumeButtonsWillControlDeviceVolume = true
+
         GCKCastContext.setSharedInstanceWith(options)
         GCKCastContext.sharedInstance().useDefaultExpandedMediaControls = true
-        
+
         let controller = GCKCastContext.sharedInstance().defaultExpandedMediaControlsViewController
         controller.setButtonType(.rewind30Seconds, at: 0)
         controller.setButtonType(.playPauseToggle, at: 1)
         controller.setButtonType(.forward30Seconds, at: 2)
         controller.setButtonType(.none, at: 3)
-        
+
         GCKCastContext.sharedInstance().sessionManager.add(self)
-        updateState()
+
+        // The proxy hands the receiver a URL naming this device's LAN address. If that
+        // address changes under a live cast the receiver is left fetching from an IP we no
+        // longer own, so re-issue the media at the position it had reached.
+        #if os(iOS)
+        CastProxyServer.shared.onLocalAddressChanged = { [weak self] in
+            Task { @MainActor in self?.reloadAfterAddressChange() }
+        }
+        #endif
+
+        apply(.started, force: true)
         #endif
     }
-    
-    private func updateState() {
+
+    // MARK: - Session state
+
+    #if canImport(GoogleCast)
+    private var session: GCKCastSession? {
+        GCKCastContext.sharedInstance().sessionManager.currentCastSession
+    }
+
+    /// The remote client, but only when it is actually safe to command. Every transport
+    /// method goes through this: previously they all read
+    /// `currentCastSession?.remoteMediaClient?.play()`, which silently did nothing once the
+    /// session was gone — the user pressed play and the app simply ignored them.
+    private var commandableClient: GCKRemoteMediaClient? {
+        guard outcome.acceptsCommands else { return nil }
+        return session?.remoteMediaClient
+    }
+    #endif
+
+    /// Folds a session lifecycle event into app state. Single entry point so a new SDK
+    /// callback can't diverge from the others.
+    ///
+    /// - Parameter force: used at startup, where there is no event — just resync to whatever
+    ///   the SDK currently holds.
+    private func apply(_ event: CastSessionEvent, error: Error? = nil, force: Bool = false) {
         #if canImport(GoogleCast)
-        let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession
-        isConnected = session != nil
+        let resolved: CastSessionOutcome
+        if force {
+            resolved = session != nil ? .connected : .disconnected
+        } else {
+            resolved = CastSessionRecovery.outcome(for: event)
+        }
+
+        if let error {
+            lastError = error.localizedDescription
+            Logger.shared.log("[Cast] \(event): \(error.localizedDescription)", type: "Error")
+        } else if resolved == .connected {
+            lastError = nil
+        }
+
+        outcome = resolved
         currentDeviceName = session?.device.friendlyName
 
-        // Keep the app alive in the background so CastProxyServer keeps serving
-        // segments after the screen locks; iOS otherwise suspends us ~30s in.
         #if os(iOS)
-        if isConnected {
+        // Keep the app alive in the background so CastProxyServer keeps serving segments
+        // after the screen locks; iOS otherwise suspends us ~30s in.
+        if resolved.isConnected {
             BackgroundKeepAlive.shared.acquire("cast")
         } else {
             BackgroundKeepAlive.shared.release("cast")
         }
         #endif
 
-        if let remoteMediaClient = session?.remoteMediaClient {
-            remoteMediaClient.add(self)
-            updateMediaStatus(remoteMediaClient.mediaStatus)
-            startVolumeObservation()
-        } else {
+        switch resolved {
+        case .connected:
+            observe(session?.remoteMediaClient)
+            updateMediaStatus(session?.remoteMediaClient?.mediaStatus)
+            if !force,
+               CastSessionRecovery.shouldReloadMedia(after: event,
+                                                     receiverHasMedia: session?.remoteMediaClient?.mediaStatus != nil),
+               let pending = pendingRequest {
+                // Resumed onto a receiver that dropped our movie — put it back where it was
+                // rather than leaving the user on the Chromecast backdrop.
+                load(pending)
+            }
+        case .reconnecting:
+            // Freeze the readout: the position we hold is the last one the TV confirmed and
+            // ticking it forward locally would drift.
             stopProgressTimer()
-            stopVolumeObservation()
+        case .disconnected:
+            observe(nil)
+            stopProgressTimer()
+            #if os(iOS)
+            CastProxyServer.shared.stop()
+            #endif
+            pendingRequest = nil
             isPlaying = false
             currentPosition = 0
             duration = 0
@@ -429,125 +528,179 @@ final class CastManager: NSObject, ObservableObject {
         #endif
     }
 
-    private func startVolumeObservation() {
-        #if os(iOS)
-        guard volumeObserver == nil else { return }
-        let audioSession = AVAudioSession.sharedInstance()
-        volumeObserver = audioSession.observe(\.outputVolume, options: [.new]) { [weak self] session, _ in
-            Task { @MainActor [weak self] in
-                guard let self, self.isConnected else { return }
-                #if canImport(GoogleCast)
-                GCKCastContext.sharedInstance().sessionManager.currentCastSession?.setDeviceVolume(session.outputVolume)
-                #endif
-            }
-        }
-        #endif
+    #if canImport(GoogleCast)
+    private func observe(_ client: GCKRemoteMediaClient?) {
+        guard observedClient !== client else { return }
+        observedClient?.remove(self)
+        observedClient = client
+        client?.add(self)
     }
 
-    private func stopVolumeObservation() {
-        volumeObserver?.invalidate()
-        volumeObserver = nil
-    }
-    
-    #if canImport(GoogleCast)
-    private func updateMediaStatus(_ status: GCKMediaStatus?) {
-        guard let status = status else { return }
-        isPlaying = status.playerState == .playing || status.playerState == .buffering
-        duration = status.mediaInformation?.streamDuration ?? 0
-        currentPosition = status.streamPosition
-        
-        if isPlaying {
-            startProgressTimer()
-        } else {
-            stopProgressTimer()
-        }
+    private func reloadAfterAddressChange() {
+        guard outcome.acceptsCommands, var pending = pendingRequest else { return }
+        Logger.shared.log("[Cast] LAN address changed — reloading media on receiver", type: "Stream")
+        pending.startTime = currentPosition
+        pendingRequest = pending
+        load(pending)
     }
     #endif
-    
-    private func startProgressTimer() {
-        progressTimer?.invalidate()
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.updateCurrentPosition()
-            }
+
+    // MARK: - Media status
+
+    #if canImport(GoogleCast)
+    private func updateMediaStatus(_ status: GCKMediaStatus?) {
+        // THE BUG: this used to `guard let status else { return }`. When the receiver
+        // dropped the media the status went nil and every field kept its last value — a
+        // scrubber still advancing over a movie that had already stopped.
+        guard let status else {
+            isPlaying = false
+            stopProgressTimer()
+            return
         }
+
+        // A receiver that hit an error goes idle with `.error`. Nothing looked at this, so a
+        // failed stream presented as an ordinary pause that no button could undo.
+        if status.playerState == .idle, status.idleReason == .error {
+            lastError = "The TV couldn't play this stream."
+            Logger.shared.log("[Cast] Receiver reported a playback error", type: "Error")
+            apply(.receiverError)
+            return
+        }
+
+        // A finished movie should hand control back, not sit on a dead cast screen.
+        if status.playerState == .idle, status.idleReason == .finished {
+            isPlaying = false
+            stopProgressTimer()
+            return
+        }
+
+        isPlaying = status.playerState == .playing || status.playerState == .buffering
+        if let usable = CastSessionRecovery.usableDuration(status.mediaInformation?.streamDuration ?? 0) {
+            duration = usable
+        }
+        currentPosition = status.streamPosition
+
+        if isPlaying { startProgressTimer() } else { stopProgressTimer() }
     }
-    
+    #endif
+
+    private func startProgressTimer() {
+        guard progressTimer == nil else { return }   // don't churn a fresh timer per status update
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateCurrentPosition() }
+        }
+        // `.common`, not the default mode: on the default mode the timer stops firing while
+        // the user is dragging anything, so the cast position froze mid-scrub.
+        RunLoop.main.add(timer, forMode: .common)
+        progressTimer = timer
+    }
+
     private func stopProgressTimer() {
         progressTimer?.invalidate()
         progressTimer = nil
     }
-    
+
     private func updateCurrentPosition() {
         #if canImport(GoogleCast)
-        if let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession,
-           let remoteMediaClient = session.remoteMediaClient {
-            currentPosition = remoteMediaClient.approximateStreamPosition()
-        }
+        guard let client = commandableClient else { return }
+        currentPosition = client.approximateStreamPosition()
         #endif
     }
-    
+
+    // MARK: - Transport
+
     func play() {
         #if canImport(GoogleCast)
-        GCKCastContext.sharedInstance().sessionManager.currentCastSession?.remoteMediaClient?.play()
+        commandableClient?.play()
         #endif
     }
-    
+
     func pause() {
         #if canImport(GoogleCast)
-        GCKCastContext.sharedInstance().sessionManager.currentCastSession?.remoteMediaClient?.pause()
+        commandableClient?.pause()
         #endif
     }
-    
+
     func seek(to time: Double) {
         #if canImport(GoogleCast)
+        guard let client = commandableClient else { return }
         let options = GCKMediaSeekOptions()
         options.interval = time
         options.resumeState = .unchanged
-        GCKCastContext.sharedInstance().sessionManager.currentCastSession?.remoteMediaClient?.seek(with: options)
+        client.seek(with: options)
+        // Reflect the seek immediately; the receiver's own status lands a beat later and
+        // would otherwise snap the scrubber back to where it was.
+        currentPosition = time
+        pendingRequest?.startTime = time
         #endif
     }
-    
+
     func skip(by seconds: Double) {
+        seek(to: max(0, currentPosition + seconds))
+    }
+
+    func setVolume(_ volume: Float) {
         #if canImport(GoogleCast)
-        let newTime = currentPosition + seconds
-        seek(to: max(0, newTime))
+        guard outcome.acceptsCommands else { return }
+        session?.setDeviceVolume(min(max(volume, 0), 1))
         #endif
     }
-    
+
+    func setPlaybackRate(_ rate: Float) {
+        #if canImport(GoogleCast)
+        commandableClient?.setPlaybackRate(rate)
+        #endif
+    }
+
     func disconnect() {
         #if canImport(GoogleCast)
         GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
+        // Don't wait for the SDK's callback: if the session is already half-dead the
+        // callback may never come, which is precisely how the app used to get stuck
+        // showing a cast screen it could not leave.
+        apply(.ended)
         #endif
     }
-    
-    func stopCasting() {
-        #if canImport(GoogleCast)
-        GCKCastContext.sharedInstance().sessionManager.endSessionAndStopCasting(true)
-        #endif
-    }
-    
+
+    func stopCasting() { disconnect() }
+
     func castMedia(url: URL, title: String, posterUrl: String?, subtitleURL: URL? = nil, startTime: Double = 0) {
+        let request = CastMediaRequest(url: url, title: title, posterUrl: posterUrl,
+                                       subtitleURL: subtitleURL, startTime: startTime)
+        pendingRequest = request
+        load(request)
+    }
+
+    private func load(_ request: CastMediaRequest) {
         #if canImport(GoogleCast)
-        guard let session = GCKCastContext.sharedInstance().sessionManager.currentCastSession else { return }
+        guard let client = commandableClient else { return }
 
         let metadata = GCKMediaMetadata(metadataType: .movie)
-        metadata.setString(title, forKey: kGCKMetadataKeyTitle)
-        if let posterUrl = posterUrl, let posterURL = URL(string: posterUrl) {
+        metadata.setString(request.title, forKey: kGCKMetadataKeyTitle)
+        if let posterUrl = request.posterUrl, let posterURL = URL(string: posterUrl) {
             metadata.addImage(GCKImage(url: posterURL, width: 480, height: 720))
         }
 
-        let isHLS = url.pathExtension.lowercased() == "m3u8"
-            || url.absoluteString.contains(".m3u8")
-        Logger.shared.log("[Cast] URL: \(Logger.redact(url)), isHLS: \(isHLS)", type: "Stream")
-        let mediaInfoBuilder = GCKMediaInformationBuilder(contentURL: url)
-        mediaInfoBuilder.streamType = isHLS ? .unknown : .buffered
-        mediaInfoBuilder.contentType = isHLS ? "application/x-mpegURL" : "video/mp4"
-        mediaInfoBuilder.metadata = metadata
+        // The proxied URL's path is `/proxy`, so the receiver cannot infer the container
+        // from the extension — the origin URL behind the `url` query item has to be what
+        // decides it.
+        let origin = URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "url" })?.value ?? request.url.absoluteString
+        let isHLS = origin.lowercased().contains(".m3u8")
 
-        if let subtitleURL {
+        Logger.shared.log("[Cast] URL: \(Logger.redact(request.url)), isHLS: \(isHLS)", type: "Stream")
+        let builder = GCKMediaInformationBuilder(contentURL: request.url)
+        // `.buffered`, not `.unknown`: with an unknown stream type the receiver treats the
+        // media as unseekable, so scrubbing on the TV did nothing.
+        builder.streamType = .buffered
+        builder.contentType = isHLS ? "application/x-mpegURL" : "video/mp4"
+        builder.metadata = metadata
+
+        if let subtitleURL = request.subtitleURL {
+            // Track identifiers must be positive; 0 is rejected by some receivers, which
+            // dropped subtitles without any error.
             let textTrack = GCKMediaTrack(
-                identifier: 0,
+                identifier: 1,
                 contentIdentifier: subtitleURL.absoluteString,
                 contentType: "text/vtt",
                 type: .text,
@@ -556,36 +709,80 @@ final class CastManager: NSObject, ObservableObject {
                 languageCode: "en",
                 customData: nil
             )
-            mediaInfoBuilder.mediaTracks = [textTrack].compactMap { $0 }
+            builder.mediaTracks = [textTrack].compactMap { $0 }
         }
 
-        let mediaInfo = mediaInfoBuilder.build()
-
-        guard let remoteMediaClient = session.remoteMediaClient else { return }
-        remoteMediaClient.add(self)
-
-        let requestDataBuilder = GCKMediaLoadRequestDataBuilder()
-        requestDataBuilder.mediaInformation = mediaInfo
-        requestDataBuilder.startTime = startTime
-        if subtitleURL != nil { requestDataBuilder.activeTrackIDs = [0] }
-        let request = remoteMediaClient.loadMedia(with: requestDataBuilder.build())
-        request.delegate = self
+        let dataBuilder = GCKMediaLoadRequestDataBuilder()
+        dataBuilder.mediaInformation = builder.build()
+        dataBuilder.startTime = request.startTime
+        dataBuilder.autoplay = true
+        if request.subtitleURL != nil { dataBuilder.activeTrackIDs = [1] }
+        let gckRequest = client.loadMedia(with: dataBuilder.build())
+        gckRequest.delegate = self
         #endif
     }
 }
 
 #if canImport(GoogleCast)
+/// The full session lifecycle. Handling only `didStart` / `didEnd` / `didResume` — as this
+/// did — left `isConnected` stuck true whenever a connection failed to establish or a
+/// suspended one failed to come back, which is what forced an app restart mid-movie.
 extension CastManager: GCKSessionManagerListener {
     nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didStart session: GCKCastSession) {
-        MainActor.assumeIsolated { updateState() }
+        MainActor.assumeIsolated { apply(.started) }
     }
 
-    nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didEnd session: GCKCastSession, withError error: Error?) {
-        MainActor.assumeIsolated { updateState() }
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didFailToStart session: GCKCastSession, withError error: Error) {
+        MainActor.assumeIsolated { apply(.failedToStart, error: error) }
+    }
+
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didEnd session: GCKCastSession, withError error: Error?) {
+        MainActor.assumeIsolated { apply(.ended, error: error) }
+    }
+
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didSuspend session: GCKCastSession, with reason: GCKConnectionSuspendReason) {
+        MainActor.assumeIsolated { apply(.suspended) }
     }
 
     nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didResumeCastSession session: GCKCastSession) {
-        MainActor.assumeIsolated { updateState() }
+        MainActor.assumeIsolated { apply(.resumed) }
+    }
+
+    /// The generic (non-cast) variants fire for the same transitions. A listener that takes
+    /// only the cast-typed half misses any transition the SDK reports generically — and a
+    /// missed "session ended" is precisely what left the app stuck on a dead cast screen.
+    /// `CastSessionListenerSelectorTests` asserts every one of these is actually reachable
+    /// from Objective-C, since an optional protocol member that fails to match just goes
+    /// quiet rather than failing to build.
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didStart session: GCKSession) {
+        MainActor.assumeIsolated { apply(.started) }
+    }
+
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didEnd session: GCKSession, withError error: Error?) {
+        MainActor.assumeIsolated { apply(.ended, error: error) }
+    }
+
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didFailToStart session: GCKSession, withError error: Error) {
+        MainActor.assumeIsolated { apply(.failedToStart, error: error) }
+    }
+
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager,
+                                    didSuspend session: GCKSession, with reason: GCKConnectionSuspendReason) {
+        MainActor.assumeIsolated { apply(.suspended) }
+    }
+
+    /// Selector pinned explicitly: Swift's importer does not give this one the name the
+    /// pattern above would suggest, and an optional ObjC requirement that fails to match
+    /// simply never fires — silently, with no build error. That is the whole failure mode
+    /// this class of bug lives in.
+    @objc(sessionManager:didResumeSession:)
+    nonisolated func sessionManager(_ sessionManager: GCKSessionManager, didResumeSession session: GCKSession) {
+        MainActor.assumeIsolated { apply(.resumed) }
     }
 }
 
@@ -597,11 +794,20 @@ extension CastManager: GCKRemoteMediaClientListener {
         let box = StatusBox(value: mediaStatus)
         Task { @MainActor in self.updateMediaStatus(box.value) }
     }
+
+    /// The receiver dropped the media entirely (an app crash on the TV, someone casting
+    /// something else to it). Without this the app kept showing a live scrubber.
+    nonisolated func remoteMediaClientDidUpdateQueue(_ client: GCKRemoteMediaClient) {
+        Task { @MainActor in self.updateMediaStatus(client.mediaStatus) }
+    }
 }
 
 extension CastManager: GCKRequestDelegate {
     nonisolated func request(_ request: GCKRequest, didFailWithError error: GCKError) {
         Logger.shared.log("[Cast] Request failed: \(error.localizedDescription)", type: "Error")
+        // A load that fails leaves the TV on its idle screen; say so instead of presenting
+        // a cast overlay for media that never started.
+        Task { @MainActor in self.lastError = error.localizedDescription }
     }
 }
 #endif

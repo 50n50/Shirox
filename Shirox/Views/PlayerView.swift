@@ -80,6 +80,15 @@ struct PlayerView: View {
     @State private var autoAdvanceTask: Task<Void, Never>? = nil
     @State private var timeObserver: Any? = nil
     @State private var rateObserver: NSKeyValueObservation? = nil
+    /// Owns the Control Center / lock screen transport registration. Held here so a player
+    /// rebuild replaces the handlers instead of stacking a second set on top.
+    #if os(iOS)
+    @State private var remoteCommands = RemoteCommandCoordinator()
+    #endif
+    /// Non-nil while playback is routed through `CastProxyServer` for an AirPlay receiver,
+    /// which is the only way a header-authenticated stream reaches an Apple TV.
+    @State private var airPlayProxyURL: URL? = nil
+    @State private var isSwappingAirPlayRoute = false
     /// KVO on the current item's `status`. Held so it survives `setupPlayer` returning and is
     /// torn down on the next setup / on exit.
     @State private var statusObserver: NSKeyValueObservation? = nil
@@ -212,6 +221,7 @@ struct PlayerView: View {
                     episodeNumber: currentContext?.episodeNumber,
                     imageUrl: currentContext?.imageUrl,
                     deviceName: castManager.currentDeviceName ?? "TV",
+                    isReconnecting: castManager.outcome == .reconnecting,
                     onDismiss: exitCastMode
                 )
                 .tint(.red)
@@ -361,6 +371,9 @@ struct PlayerView: View {
             cancelStallWatchdog(resetAttempts: true)
             if let obs = timeObserver { player?.removeTimeObserver(obs) }
             rateObserver?.invalidate()
+            #if os(iOS)
+            CastProxyServer.shared.stop(reason: "airplay")
+            #endif
             statusObserver?.invalidate()
             statusObserver = nil
             for token in itemNotificationObservers { NotificationCenter.default.removeObserver(token) }
@@ -384,22 +397,17 @@ struct PlayerView: View {
         }
         .onChangeOf(volume) { newVolume in
             player?.volume = newVolume
-            #if canImport(GoogleCast)
-            if castManager.isConnected {
-                GCKCastContext.sharedInstance().sessionManager.currentCastSession?.setDeviceVolume(newVolume)
-            }
-            #endif
+            castManager.setVolume(newVolume)
         }
         .onChangeOf(playbackSpeed) { newSpeed in
-            #if canImport(GoogleCast)
             if castManager.isConnected {
-                GCKCastContext.sharedInstance().sessionManager.currentCastSession?.remoteMediaClient?.setPlaybackRate(Float(newSpeed))
+                castManager.setPlaybackRate(Float(newSpeed))
                 return
             }
-            #endif
             if isPlaying { player?.rate = Float(newSpeed) }
         }
         .onChangeOf(castManager.isConnected) { connected in
+            defer { if let p = player { updateNowPlaying(player: p) } }
             if connected {
                 castCurrentMedia()
                 player?.pause()
@@ -411,7 +419,7 @@ struct PlayerView: View {
                 // position observer above is gated on `isConnected`, so the SDK's
                 // reset-to-zero on disconnect can't clobber it.
                 #if os(iOS)
-                CastProxyServer.shared.stop()
+                CastProxyServer.shared.stop(reason: "cast")
                 #endif
                 if let player {
                     player.seek(to: CMTime(seconds: currentTime, preferredTimescale: 600))
@@ -422,18 +430,30 @@ struct PlayerView: View {
             }
         }
         .onChangeOf(castManager.isPlaying) { playing in
-            if castManager.isConnected { isPlaying = playing }
+            guard castManager.isConnected else { return }
+            isPlaying = playing
+            // The TV's own remote (or the Google Home app) can pause playback. Without this
+            // Control Center keeps advertising the state the phone last set.
+            if let p = player { updateNowPlaying(player: p) }
         }
         .onChangeOf(castManager.currentPosition) { pos in
             if castManager.isConnected && !isScrubbing {
                 currentTime = pos
                 saveProgressIfDue()
+                // The periodic time observer that normally refreshes Now Playing is driven by
+                // the LOCAL player's timeline, which is parked during a cast — so the receiver's
+                // position is the only thing that can move Control Center's scrubber.
+                if let p = player { updateNowPlaying(player: p) }
             }
         }
         .onChangeOf(castManager.duration) { dur in
             if castManager.isConnected && dur > 0 { duration = dur }
         }
         #if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
+            .receive(on: RunLoop.main)) { _ in
+            handleExternalPlaybackChange(Self.isAirPlayRouteActive)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // Persist the live position the moment the user leaves the app — this is
             // the last reliable signal before a swipe-away kill (which never calls
@@ -1194,7 +1214,12 @@ struct PlayerView: View {
         castManager.disconnect()
     }
 
-    private func castCurrentMedia() {
+    /// - Parameter startTime: where the receiver should begin. Passed explicitly rather than
+    ///   read inside the task: this suspends on the proxy starting, and a cast-position update
+    ///   for the *previous* media can land during that await and move `currentTime` — which
+    ///   would start a freshly-swapped episode at the old episode's timestamp.
+    private func castCurrentMedia(startTime: Double? = nil) {
+        let requestedStart = startTime ?? currentTime
         Task {
             // Keep app alive when screen locks while casting. AVPlayer is paused
             // during cast so the audio session needs explicit reactivation.
@@ -1206,7 +1231,7 @@ struct PlayerView: View {
             let castURL: URL
             if !currentStream.headers.isEmpty {
                 #if os(iOS)
-                await CastProxyServer.shared.startAndWait(headers: currentStream.headers)
+                await CastProxyServer.shared.startAndWait(headers: currentStream.headers, reason: "cast")
                 castURL = CastProxyServer.shared.proxyURL(for: currentStream.url) ?? currentStream.url
                 #else
                 castURL = currentStream.url
@@ -1220,20 +1245,104 @@ struct PlayerView: View {
                 title: currentContext?.mediaTitle ?? currentStream.title,
                 posterUrl: currentContext?.imageUrl,
                 subtitleURL: subtitleURL,
-                startTime: currentTime
+                startTime: requestedStart
             )
         }
     }
 
+    /// Whether an AirPlay receiver currently owns the output route. Read from the audio
+    /// session rather than `AVPlayer.isExternalPlaybackActive` deliberately: the swap below
+    /// builds a new player, and a fresh instance reports `false` until it re-attaches — so
+    /// keying off the player would immediately undo the swap and oscillate.
+    #if os(iOS)
+    static var isAirPlayRouteActive: Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+    }
+    #endif
+
+    /// Re-routes playback when an AirPlay receiver takes over, or hands it back when it stops.
+    ///
+    /// THE BUG: AirPlay *video* doesn't send frames to the Apple TV — it hands over the
+    /// asset's URL and the receiver fetches it itself. The `AVURLAssetHTTPHeaderFieldsKey`
+    /// headers a scraped stream needs don't travel with that handoff, so the Apple TV's
+    /// request came back 403 and the user got a black TV with no explanation. Routing those
+    /// streams through `CastProxyServer` — already on the LAN, already injecting the headers
+    /// for Chromecast — makes the receiver's own fetch authenticate.
+    @MainActor
+    private func handleExternalPlaybackChange(_ isActive: Bool) {
+        #if os(iOS)
+        // The rebuild below changes the route itself, which re-fires this notification.
+        guard !isSwappingAirPlayRoute else { return }
+        // While casting the local player is deliberately parked and the TV is fed by the
+        // Chromecast path. Rebuilding it here would start a second, audible playback.
+        guard !castManager.isConnected else { return }
+
+        let needsProxy = AirPlayRouting.needsProxy(
+            url: currentStream.url,
+            headers: currentStream.headers,
+            isAirPlayActive: isActive
+        )
+        guard AirPlayRouting.shouldRebuild(currentlyProxied: airPlayProxyURL != nil,
+                                           needsProxy: needsProxy) else { return }
+
+        isSwappingAirPlayRoute = true
+        Task { @MainActor in
+            defer { isSwappingAirPlayRoute = false }
+
+            let resumeAt = currentTime
+            if needsProxy {
+                await CastProxyServer.shared.startAndWait(headers: currentStream.headers, reason: "airplay")
+                guard let proxied = CastProxyServer.shared.proxyURL(for: currentStream.url) else {
+                    // No usable LAN address (no Wi-Fi) — the receiver could not have reached
+                    // us anyway. Leave the direct URL in place rather than break local playback.
+                    CastProxyServer.shared.stop(reason: "airplay")
+                    Logger.shared.log("[AirPlay] No LAN address; keeping direct URL", type: "Error")
+                    return
+                }
+                Logger.shared.log("[AirPlay] Routing through proxy: \(Logger.redact(proxied))", type: "Stream")
+                airPlayProxyURL = proxied
+            } else {
+                Logger.shared.log("[AirPlay] Ended; restoring direct URL", type: "Stream")
+                airPlayProxyURL = nil
+                CastProxyServer.shared.stop(reason: "airplay")
+            }
+
+            // Same clean-slate path the stall recovery uses: seed the resume position and
+            // rebuild, so the swap lands back exactly where the user was.
+            currentContext?.resumeFrom = resumeAt
+            didSeekToResume = false
+            player?.pause()
+            setupPlayer()
+        }
+        #endif
+    }
+
     private func togglePlayPause() {
-        if castManager.isConnected {
-            if isPlaying { castManager.pause() } else { castManager.play() }
+        // Resolve the intent from the state the user was looking at, once. The old code
+        // re-read the player inside the handler, which is only correct if the handler runs
+        // exactly once — and duplicate Control Center registrations meant it didn't, so the
+        // first call paused and the second immediately played again.
+        let intent = PlaybackRouting.toggleIntent(isPlaying: isPlaying)
+        switch PlaybackRouting.target(isCasting: castManager.isConnected, hasLocalPlayer: player != nil) {
+        case .cast:
+            switch intent {
+            case .pause: castManager.pause()
+            case .play:  castManager.play()
+            }
+            // Mirror it locally right away: the receiver's own status lands a beat later, and
+            // until it does Control Center would keep advertising the state we just left.
+            isPlaying = (intent == .play)
+            if let p = player { updateNowPlaying(player: p) }
             setControlsVisible(true)
             scheduleHide()
             return
+        case .none:
+            return
+        case .local:
+            break
         }
         guard let player else { return }
-        if isPlaying {
+        if intent == .pause {
             player.pause()
             isPlaying = false
         } else {
@@ -1253,6 +1362,8 @@ struct PlayerView: View {
         // advancing. The dedup means the `rateObserver` callback this pause/resume triggers
         // won't double-report.
         reportPlaybackStateChange(paused: !isPlaying)
+        // `player` is the non-optional shadow from the guard above.
+        updateNowPlaying(player: player)
         setControlsVisible(true)
         scheduleHide()
     }
@@ -1392,8 +1503,13 @@ struct PlayerView: View {
             return
         }
 
+        // While AirPlay is driving the TV, a header-authenticated stream is played from the
+        // LAN proxy instead: the Apple TV fetches the URL itself and AVURLAsset's headers
+        // don't travel with the handoff, so the direct URL 403s to a black screen there.
         let asset: AVURLAsset
-        if currentStream.url.isFileURL {
+        if let proxied = airPlayProxyURL {
+            asset = AVURLAsset(url: proxied)
+        } else if currentStream.url.isFileURL {
             asset = AVURLAsset(url: currentStream.url)
         } else if !currentStream.headers.isEmpty {
             let opts: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": currentStream.headers]
@@ -1569,7 +1685,7 @@ struct PlayerView: View {
 
         scheduleHide()
         #if os(iOS)
-        setupRemoteCommands(player: p)
+        setupRemoteCommands()
         #endif
     }
 
@@ -1645,41 +1761,26 @@ struct PlayerView: View {
     }
 
     #if os(iOS)
-    private func setupRemoteCommands(player p: AVPlayer) {
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.isEnabled = true
-        center.pauseCommand.isEnabled = true
-        center.togglePlayPauseCommand.isEnabled = true
-        center.changePlaybackPositionCommand.isEnabled = true
-        center.skipForwardCommand.isEnabled = true
-        center.skipForwardCommand.preferredIntervals = [NSNumber(value: skipShort)]
-        center.skipBackwardCommand.isEnabled = true
-        center.skipBackwardCommand.preferredIntervals = [NSNumber(value: skipShort)]
-
-        center.playCommand.addTarget { [weak p] _ in p?.play(); return .success }
-        center.pauseCommand.addTarget { [weak p] _ in p?.pause(); return .success }
-        center.togglePlayPauseCommand.addTarget { [weak p] _ in
-            guard let p else { return .commandFailed }
-            if p.timeControlStatus == .paused { p.play() } else { p.pause() }
-            return .success
-        }
-        center.changePlaybackPositionCommand.addTarget { [weak p] event in
-            guard let p, let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
-            p.seek(to: CMTime(seconds: e.positionTime, preferredTimescale: 600))
-            return .success
-        }
-        center.skipForwardCommand.addTarget { [weak p] _ in
-            guard let p else { return .commandFailed }
-            let t = p.currentTime().seconds + 10
-            p.seek(to: CMTime(seconds: t, preferredTimescale: 600))
-            return .success
-        }
-        center.skipBackwardCommand.addTarget { [weak p] _ in
-            guard let p else { return .commandFailed }
-            let t = max(0, p.currentTime().seconds - 10)
-            p.seek(to: CMTime(seconds: t, preferredTimescale: 600))
-            return .success
-        }
+    /// Wires the lock screen / Control Center transport controls.
+    ///
+    /// The handlers deliberately call the same functions the on-screen buttons do rather than
+    /// poking the `AVPlayer`. Driving the player directly (as this used to) skipped everything
+    /// those functions are responsible for: routing the command to the Chromecast when one is
+    /// connected, reactivating an audio session another app had taken, preserving the user's
+    /// playback speed instead of resetting it to 1.0, and reporting the new state upstream.
+    ///
+    /// Registration itself is idempotent — see `RemoteCommandCoordinator`, which exists
+    /// because this ran on every `setupPlayer()` and used to stack a fresh set of handlers
+    /// each time, leaving the toggle to cancel itself out.
+    private func setupRemoteCommands() {
+        remoteCommands.register(
+            skipInterval: Double(skipShort),
+            play: { if !isPlaying { togglePlayPause() } },
+            pause: { if isPlaying { togglePlayPause() } },
+            toggle: { togglePlayPause() },
+            seek: { position in seekTo(position) },
+            skip: { delta in skip(by: delta) }
+        )
     }
     #endif
 
@@ -1695,11 +1796,20 @@ struct PlayerView: View {
             subtitleString = epTitle ?? ""
         }
 
+        let target = PlaybackRouting.target(isCasting: castManager.isConnected, hasLocalPlayer: true)
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: mediaTitle,
             MPNowPlayingInfoPropertyIsLiveStream: false,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: p.currentTime().seconds,
-            MPNowPlayingInfoPropertyPlaybackRate: Double(p.rate)
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: PlaybackRouting.nowPlayingElapsed(
+                target: target,
+                castPosition: castManager.currentPosition,
+                localPosition: p.currentTime().seconds
+            ),
+            MPNowPlayingInfoPropertyPlaybackRate: PlaybackRouting.nowPlayingRate(
+                target: target,
+                isPlaying: isPlaying,
+                playbackSpeed: playbackSpeed
+            )
         ]
         if duration > 0 { info[MPMediaItemPropertyPlaybackDuration] = duration }
         if !subtitleString.isEmpty {
@@ -1731,13 +1841,9 @@ struct PlayerView: View {
 
     private func tearDownNowPlaying() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.removeTarget(nil)
-        center.pauseCommand.removeTarget(nil)
-        center.togglePlayPauseCommand.removeTarget(nil)
-        center.changePlaybackPositionCommand.removeTarget(nil)
-        center.skipForwardCommand.removeTarget(nil)
-        center.skipBackwardCommand.removeTarget(nil)
+        #if os(iOS)
+        remoteCommands.unregister()
+        #endif
     }
 
     /// Watches `item.status` so a stream that dies is re-extracted instead of leaving the user on
@@ -2332,6 +2438,17 @@ struct PlayerView: View {
     private func switchQuality(_ next: StreamResult) {
         guard next.url != currentStream.url else { return }
         let resumeAt = currentTime
+        // While casting, quality is the receiver's business: rebuilding the local item would
+        // leave the TV on the old rendition and (before this) start the new one on the phone.
+        // Re-issue the chosen stream to the receiver at the position it had reached.
+        if castManager.isConnected {
+            currentStream = next
+            subtitleTracks = next.allSubtitles ?? subtitleTracks
+            selectedQualityBandwidth = nil
+            castCurrentMedia(startTime: resumeAt)
+            scheduleHide()
+            return
+        }
         let asset: AVURLAsset
         if !next.headers.isEmpty { asset = AVURLAsset(url: next.url, options: ["AVURLAssetHTTPHeaderFieldsKey": next.headers]) }
         else { asset = AVURLAsset(url: next.url) }
@@ -2402,7 +2519,18 @@ struct PlayerView: View {
         // screen with no refetch and no error — the launch item's observer no longer applies.
         observeItemStatus(newItem)
         player?.replaceCurrentItem(with: newItem)
-        player?.rate = Float(playbackSpeed)
+        // THE BUG: this used to start the local player unconditionally. During a cast the
+        // local player is deliberately parked and silent, so an auto-advance played episode 2
+        // out of the handset while the Chromecast still sat on the finished episode 1. The new
+        // episode goes to whichever engine actually owns playback — see the cast hand-off at
+        // the end of this function, once `currentStream` describes the new episode.
+        let swapTarget = PlaybackRouting.target(isCasting: castManager.isConnected,
+                                                hasLocalPlayer: player != nil)
+        if swapTarget == .cast {
+            player?.pause()
+        } else {
+            player?.rate = Float(playbackSpeed)
+        }
         isPlaying = true
         currentTime = 0
         duration = 0
@@ -2461,6 +2589,7 @@ struct PlayerView: View {
                 skipSegments = result
             }
         }
+        if swapTarget == .cast { castCurrentMedia(startTime: 0) }
         if let p = player { updateNowPlaying(player: p) }
         scheduleHide()
     }

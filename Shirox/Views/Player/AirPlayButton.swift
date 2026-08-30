@@ -11,6 +11,10 @@ struct AirPlayButton: UIViewRepresentable {
         let view = AVRoutePickerView()
         view.tintColor = .white
         view.activeTintColor = .systemBlue
+        // Rank video-capable receivers (Apple TV, AirPlay 2 TVs) above speakers. Without
+        // it the picker leads with HomePods for what is a video player, and choosing one
+        // hands over audio only — the phone keeps the picture and the user sees a bug.
+        view.prioritizesVideoDevices = true
         return view
     }
 
