@@ -512,7 +512,7 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     @Published private var token: String?
     private var tokenExpiry: Date?
 
-    // Cache: AniListID or MALID -> (TVDB_ID, SeasonNumber, PosterPath?, FanartPath?)
+    // Cache: AniListID or MALID -> (TVDB_ID, SeasonNumber, PosterPath?, FanartPath?, LogoPath?, TextlessPosterPath?)
     struct CachedData: Codable {
         let tid: Int
         var season: Int?
@@ -520,6 +520,8 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         var epOffsetFetched: Bool?  // nil = old entry (pre-epOffset), true = fetched fresh
         var posterPath: String?
         var fanartPath: String?
+        var logoPath: String?
+        var textlessPosterPath: String?
     }
     private var cache: [Int: CachedData] = [:]       // keyed by AniList ID
     private var malCache: [Int: CachedData] = [:]     // keyed by MAL ID
@@ -796,31 +798,35 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         return results
     }
 
-    func getCachedArtwork(for id: Int, provider: ProviderType = .anilist) -> (poster: String?, fanart: String?) {
+    func getCachedArtwork(for id: Int, provider: ProviderType = .anilist) -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
         if let c = tvdbCache(for: provider)[id] {
-            return (formatURL(c.posterPath), formatURL(c.fanartPath))
+            return (formatURL(c.posterPath), formatURL(c.fanartPath), formatURL(c.logoPath), formatURL(c.textlessPosterPath))
         }
-        return (nil, nil)
+        return (nil, nil, nil, nil)
     }
 
-    func getArtwork(for id: Int, provider: ProviderType = .anilist) async -> (poster: String?, fanart: String?) {
-        if let c = tvdbCache(for: provider)[id], c.posterPath != nil || c.fanartPath != nil {
-            return (formatURL(c.posterPath), formatURL(c.fanartPath))
+    func getArtwork(for id: Int, provider: ProviderType = .anilist) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
+        if let c = tvdbCache(for: provider)[id], c.posterPath != nil || c.fanartPath != nil || c.logoPath != nil || c.textlessPosterPath != nil {
+            return (formatURL(c.posterPath), formatURL(c.fanartPath), formatURL(c.logoPath), formatURL(c.textlessPosterPath))
         }
         guard let mapping = await getTVDBId(for: id, provider: provider), mapping.id > 0 else {
-            return (nil, nil)
+            return (nil, nil, nil, nil)
         }
         let artwork = await fetchTVDBIdArtwork(tid: mapping.id, targetSeason: mapping.season)
         if provider == .mal {
             malCache[id]?.posterPath = artwork.poster
             malCache[id]?.fanartPath = artwork.fanart
+            malCache[id]?.logoPath = artwork.logo
+            malCache[id]?.textlessPosterPath = artwork.textlessPoster
             saveMALCache()
         } else {
             cache[id]?.posterPath = artwork.poster
             cache[id]?.fanartPath = artwork.fanart
+            cache[id]?.logoPath = artwork.logo
+            cache[id]?.textlessPosterPath = artwork.textlessPoster
             saveCache()
         }
-        return (formatURL(artwork.poster), formatURL(artwork.fanart))
+        return (formatURL(artwork.poster), formatURL(artwork.fanart), formatURL(artwork.logo), formatURL(artwork.textlessPoster))
     }
 
 
@@ -1069,12 +1075,15 @@ enum BrowseCategory: String, CaseIterable, Hashable {
     }
 
     /// Shared TVDB artwork fetch used by both AniList and MAL paths.
-    private func fetchTVDBIdArtwork(tid: Int, targetSeason: Int?) async -> (poster: String?, fanart: String?) {
+    private func fetchTVDBIdArtwork(tid: Int, targetSeason: Int?) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
         struct Artwork: Decodable {
             let image: String
             let type: Int
+            let language: String?
             let width: Int?
             let height: Int?
+            let includesText: Bool?
+            let score: Double?
         }
         struct SeasonType: Decodable { let id: Int; let type: String? }
         struct Season: Decodable { let id: Int; let number: Int; let type: SeasonType? }
@@ -1106,27 +1115,66 @@ enum BrowseCategory: String, CaseIterable, Hashable {
                 return res.data.artwork ?? []
             }
 
-            guard let seriesData = await fetchSeriesExtended() else { return (nil, nil) }
+            guard let seriesData = await fetchSeriesExtended() else { return (nil, nil, nil, nil) }
             let artworks = seriesData.artworks ?? []
-            let bySize: (Artwork, Artwork) -> Bool = { ($0.width ?? 0) * ($0.height ?? 0) > ($1.width ?? 0) * ($1.height ?? 0) }
-            let fanart = artworks.filter { $0.type == 3 }.sorted(by: bySize).first?.image
+            let bySizeOrScore: (Artwork, Artwork) -> Bool = { a, b in
+                let scoreA = a.score ?? 0
+                let scoreB = b.score ?? 0
+                if scoreA != scoreB { return scoreA > scoreB }
+                return ((a.width ?? 0) * (a.height ?? 0)) > ((b.width ?? 0) * (b.height ?? 0))
+            }
 
-            var poster: String?
+            let fanart = artworks.filter { $0.type == 3 }.sorted(by: bySizeOrScore).first?.image
+
+            var seasonArtworks: [Artwork] = []
             if let targetSeason {
                 let officialSeasons = seriesData.seasons?.filter { $0.type?.type == "official" || $0.type?.id == 1 }
                 if let seasonId = officialSeasons?.first(where: { $0.number == targetSeason })?.id {
-                    let seasonArtworks = await fetchSeasonArtwork(seasonId: seasonId)
-                    poster = seasonArtworks.filter { $0.type == 7 }.sorted(by: bySize).first?.image
-                        ?? seasonArtworks.sorted(by: bySize).first?.image
+                    seasonArtworks = await fetchSeasonArtwork(seasonId: seasonId)
                 }
             }
-            if poster == nil {
-                poster = artworks.filter { $0.type == 2 }.sorted(by: bySize).first?.image
+
+            var poster: String?
+            if !seasonArtworks.isEmpty {
+                poster = seasonArtworks.filter { $0.type == 7 }.sorted(by: bySizeOrScore).first?.image
+                    ?? seasonArtworks.sorted(by: bySizeOrScore).first?.image
             }
-            return (poster, fanart)
+            if poster == nil {
+                poster = artworks.filter { $0.type == 2 }.sorted(by: bySizeOrScore).first?.image
+            }
+
+            // Textless poster: includesText == false
+            var textlessPoster: String?
+            if !seasonArtworks.isEmpty {
+                textlessPoster = seasonArtworks.filter { ($0.type == 7 || $0.type == 2) && $0.includesText == false }
+                    .sorted(by: bySizeOrScore).first?.image
+            }
+            if textlessPoster == nil {
+                textlessPoster = artworks.filter { ($0.type == 2 || $0.type == 7) && $0.includesText == false }
+                    .sorted(by: bySizeOrScore).first?.image
+            }
+            // Fall back to standard poster if no explicit textless variant is available
+            if textlessPoster == nil {
+                textlessPoster = poster
+            }
+
+            // Logo: Strict priority on ClearLogo (23, 14), fallback to ClearArt (22, 24, 25) only if no ClearLogo exists
+            let clearLogoArtworks = artworks.filter { $0.type == 23 || $0.type == 14 }
+            let englishClearLogo = clearLogoArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
+            let anyClearLogo = clearLogoArtworks.sorted(by: bySizeOrScore).first?.image
+            let clearLogo = englishClearLogo ?? anyClearLogo
+
+            let clearArtArtworks = artworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
+            let englishClearArt = clearArtArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
+            let anyClearArt = clearArtArtworks.sorted(by: bySizeOrScore).first?.image
+            let clearArt = englishClearArt ?? anyClearArt
+
+            let logo = clearLogo ?? clearArt
+
+            return (poster, fanart, logo, textlessPoster)
         } catch {
             Logger.shared.log("TVDB artwork fetch error: \(error)", type: "Error")
-            return (nil, nil)
+            return (nil, nil, nil, nil)
         }
     }
     }

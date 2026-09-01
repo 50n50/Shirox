@@ -206,7 +206,11 @@ private struct FeaturedCarousel: View {
                         .frame(width: 1, height: 1)
                         .opacity(0)
                         .allowsHitTesting(false)
-                    TVDBPosterImage(media: displayItems[i], type: .poster)
+                    TVDBPosterImage(media: displayItems[i], type: .textlessPoster)
+                        .frame(width: 1, height: 1)
+                        .opacity(0)
+                        .allowsHitTesting(false)
+                    TVDBPosterImage(media: displayItems[i], type: .logo)
                         .frame(width: 1, height: 1)
                         .opacity(0)
                         .allowsHitTesting(false)
@@ -224,11 +228,15 @@ private struct FeaturedCarousel: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
-                    .frame(height: 360)
+                    .frame(height: 420)
                     .allowsHitTesting(false)
 
                     if let currentMedia {
                         VStack(spacing: 10) {
+                            TVDBTitleLogoView(media: currentMedia, maxHeight: 135, maxWidth: 360, alignment: .center)
+                                .id(currentMedia.uniqueId)
+                                .padding(.horizontal, 16)
+
                             if let genres = currentMedia.genres, !genres.isEmpty {
                                 HStack(spacing: 6) {
                                     ForEach(genres.prefix(3), id: \.self) { g in
@@ -242,12 +250,6 @@ private struct FeaturedCarousel: View {
                                     }
                                 }
                             }
-
-                            Text(currentMedia.title.displayTitle)
-                                .font(.title2.weight(.bold))
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(2)
 
                             if let desc = currentMedia.plainDescription, !desc.isEmpty {
                                 Text(String(desc.prefix(120)) + (desc.count > 120 ? "…" : ""))
@@ -347,10 +349,8 @@ private struct MacFeaturedCarousel: View {
                                 .shadow(radius: 4)
 
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(media.title.displayTitle)
-                                    .font(.title2).fontWeight(.bold)
-                                    .foregroundStyle(.white)
-                                    .lineLimit(2)
+                                TVDBTitleLogoView(media: media, maxHeight: 80, maxWidth: 280, alignment: .leading)
+                                    .id(media.uniqueId)
 
                                 if let desc = media.plainDescription, !desc.isEmpty {
                                     Text(desc)
@@ -497,7 +497,7 @@ private struct FeaturedCard: View {
                 GeometryReader { geo in
                     let pageOffset = geo.frame(in: .global).minX
                     let buffer: CGFloat = 100
-                    TVDBPosterImage(media: media)
+                    TVDBPosterImage(media: media, type: .textlessPoster)
                         .frame(width: geo.size.width + buffer, height: geo.size.height)
                         .offset(x: -(buffer / 2) - pageOffset * 0.25)
                 }
