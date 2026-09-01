@@ -114,8 +114,6 @@ struct HomeView: View {
 private struct FeaturedCarousel: View {
     let items: [Media]
     @State private var selectedTab = 1000
-    @State private var containerWidth: CGFloat = 0
-    @State private var stretchAmount: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var realItems: [Media] { items.prefix(8).map { $0 } }
@@ -136,71 +134,120 @@ private struct FeaturedCarousel: View {
         #endif
     }
 
+    #if os(iOS) && !targetEnvironment(macCatalyst)
+    private var carouselHeight: CGFloat {
+        let isIPad = sizeClass == .regular
+        let screen = UIScreen.main.bounds
+        return isIPad ? (screen.width * (9.0 / 16.0)) : (screen.height - 140)
+    }
+    #endif
+
     var body: some View {
         #if os(iOS) && !targetEnvironment(macCatalyst)
         let isIPad = sizeClass == .regular
-        let effectiveWidth = containerWidth > 0 ? containerWidth : UIScreen.main.bounds.width
-        let imageHeight: CGFloat = isIPad
-            ? effectiveWidth * (9.0 / 16.0)
-            : UIScreen.main.bounds.height - 140
-
         let displayItems = realItems
-        // `displayItems` is `items.prefix(8)`, so it is empty exactly when `items` is — the old
-        // `displayItems.isEmpty ? items[0] : …` indexed the empty array in precisely the case it
-        // was guarding against. SwiftUI can still evaluate this body once with an emptied
-        // `items` while the parent's `if !vm.trending.isEmpty` is being torn down, which crashed
-        // the Home tab whenever trending went from populated to empty (failed refresh, offline).
         let currentMedia = displayItems.indices.contains(currentIndex) ? displayItems[currentIndex] : nil
+        let baseHeight = carouselHeight
 
         VStack(spacing: 0) {
-            ZStack {
-                // Pull-down sensor: sibling of TabView so re-evaluation never cascades into
-                // TabView layout. Preference fires max(0,scrollY); stretchAmount only changes
-                // when the user is pulling down — stable (= 0) during normal scroll and swipes.
-                GeometryReader { proxy in
-                    Color.clear.preference(key: CarouselStretchKey.self,
-                                           value: max(0, proxy.frame(in: .named("homeScroll")).minY))
-                }
+            GeometryReader { geo in
+                let minY = geo.frame(in: .named("homeScroll")).minY
+                let isPullingDown = minY > 0
+                let maxStretch: CGFloat = 75
+                let stretchAmount = isPullingDown ? min(minY * 0.45, maxStretch) : 0
+                let scale = 1.0 + (stretchAmount / max(baseHeight, 1))
 
-                // iPad fanart background behind the cards
-                if isIPad, !displayItems.isEmpty {
-                    TVDBPosterImage(media: displayItems[currentIndex], type: .fanart)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                ZStack(alignment: .bottom) {
+                    // Cards and Poster visual layer (stretches with GPU transform, keeping TabView layout fixed)
+                    ZStack(alignment: .top) {
+                        if isIPad, !displayItems.isEmpty {
+                            TVDBPosterImage(media: displayItems[currentIndex], type: .fanart)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
 
-                // TabView: completely stable — fixed height, zero scroll dependency.
-                // Images live inside FeaturedCard so they move naturally with swipe gestures.
-                TabView(selection: $selectedTab) {
-                    ForEach(0..<2000, id: \.self) { index in
-                        if !displayItems.isEmpty {
-                            FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
-                                .allowsHitTesting(false)
-                                .tag(index)
+                        TabView(selection: $selectedTab) {
+                            ForEach(0..<2000, id: \.self) { index in
+                                if !displayItems.isEmpty {
+                                    FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
+                                        .allowsHitTesting(false)
+                                        .tag(index)
+                                }
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(width: geo.size.width, height: baseHeight)
+                    }
+                    .frame(width: geo.size.width, height: baseHeight)
+                    .scaleEffect(scale, anchor: .bottom)
+                    .offset(y: isPullingDown ? -(minY - stretchAmount) : 0)
+
+                    // Overlay Content (Title Logo, Tags, Synopsis, Button)
+                    ZStack(alignment: .bottom) {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: platformBackground.opacity(0.5), location: 0.38),
+                                .init(color: platformBackground.opacity(0.88), location: 0.68),
+                                .init(color: platformBackground, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 420)
+                        .allowsHitTesting(false)
+
+                        if let currentMedia {
+                            VStack(spacing: 10) {
+                                TVDBTitleLogoView(media: currentMedia, maxHeight: 135, maxWidth: 360, alignment: .center)
+                                    .id(currentMedia.uniqueId)
+                                    .padding(.horizontal, 16)
+
+                                if let genres = currentMedia.genres, !genres.isEmpty {
+                                    HStack(spacing: 6) {
+                                        ForEach(genres.prefix(3), id: \.self) { g in
+                                            Text(g)
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(.primary)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 3)
+                                                .background(Color.primary.opacity(0.1), in: Capsule())
+                                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
+                                        }
+                                    }
+                                }
+
+                                if let desc = currentMedia.plainDescription, !desc.isEmpty {
+                                    Text(String(desc.prefix(120)) + (desc.count > 120 ? "…" : ""))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(2)
+                                        .padding(.horizontal, 8)
+                                }
+
+                                NavigationLink {
+                                    AniListDetailView(mediaId: currentMedia.id, preloadedMedia: currentMedia)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "play.fill").font(.footnote.weight(.semibold))
+                                        Text("Watch").fontWeight(.semibold)
+                                    }
+                                    .foregroundStyle(platformBackground)
+                                    .frame(width: 130, height: 42)
+                                    .background(Color.primary, in: RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 18)
                         }
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(maxWidth: .infinity)
-                .frame(height: imageHeight)
+                .frame(width: geo.size.width, height: baseHeight)
             }
-            .frame(height: imageHeight)
-            // Elastic stretch: render-only transforms — layout size never changes so
-            // UIScrollView's bounce is never disrupted.
-            // scaleEffect grows the image from the top anchor.
-            // offset cancels the bounce displacement so the top edge stays pinned at screen y=0.
-            .scaleEffect(1 + stretchAmount / imageHeight, anchor: .top)
-            .offset(y: -stretchAmount)
-            .onPreferenceChange(CarouselStretchKey.self) { y in stretchAmount = y }
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { containerWidth = geo.size.width }
-                        .onChangeOf(geo.size.width) { w in containerWidth = w }
-                }
-            )
-            .mask(alignment: .bottom) { Rectangle().frame(height: imageHeight + 2000) }
+            .frame(height: baseHeight)
             .background {
-                // Hidden preloader — triggers image fetch for all items into NSCache
                 ForEach(displayItems.indices, id: \.self) { i in
                     TVDBPosterImage(media: displayItems[i], type: .fanart)
                         .frame(width: 1, height: 1)
@@ -214,69 +261,6 @@ private struct FeaturedCarousel: View {
                         .frame(width: 1, height: 1)
                         .opacity(0)
                         .allowsHitTesting(false)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                ZStack(alignment: .bottom) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: platformBackground.opacity(0.5), location: 0.38),
-                            .init(color: platformBackground.opacity(0.88), location: 0.68),
-                            .init(color: platformBackground, location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 420)
-                    .allowsHitTesting(false)
-
-                    if let currentMedia {
-                        VStack(spacing: 10) {
-                            TVDBTitleLogoView(media: currentMedia, maxHeight: 135, maxWidth: 360, alignment: .center)
-                                .id(currentMedia.uniqueId)
-                                .padding(.horizontal, 16)
-
-                            if let genres = currentMedia.genres, !genres.isEmpty {
-                                HStack(spacing: 6) {
-                                    ForEach(genres.prefix(3), id: \.self) { g in
-                                        Text(g)
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(.primary)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 3)
-                                            .background(Color.primary.opacity(0.1), in: Capsule())
-                                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
-                                    }
-                                }
-                            }
-
-                            if let desc = currentMedia.plainDescription, !desc.isEmpty {
-                                Text(String(desc.prefix(120)) + (desc.count > 120 ? "…" : ""))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .padding(.horizontal, 8)
-                            }
-
-                            NavigationLink {
-                                AniListDetailView(mediaId: currentMedia.id, preloadedMedia: currentMedia)
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "play.fill").font(.footnote.weight(.semibold))
-                                    Text("Watch").fontWeight(.semibold)
-                                }
-                                .foregroundStyle(platformBackground)
-                                .frame(width: 130, height: 42)
-                                .background(Color.primary, in: RoundedRectangle(cornerRadius: 12))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 18)
-                    }
                 }
             }
 
