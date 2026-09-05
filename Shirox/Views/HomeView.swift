@@ -19,6 +19,24 @@ struct HomeView: View {
         #endif
     }
 
+    @State private var isRefreshing = false
+
+    private func performRefresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await vm.reload() }
+            group.addTask {
+                await ContinueWatchingManager.shared.syncWithAniList()
+                await ContinueWatchingManager.shared.syncWithMAL()
+            }
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        withAnimation(.easeOut(duration: 0.25)) {
+            isRefreshing = false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -40,7 +58,7 @@ struct HomeView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 24) {
                             if !vm.trending.isEmpty {
-                                FeaturedCarousel(items: vm.trending)
+                                FeaturedCarousel(items: vm.trending, isRefreshing: isRefreshing, onRefresh: performRefresh)
                             }
                             #if os(iOS)
                             if !continueWatching.items.isEmpty {
@@ -64,17 +82,6 @@ struct HomeView: View {
                             }
                         }
                         Spacer().frame(height: 28)
-                    }
-                    .refreshable {
-                        await withTaskGroup(of: Void.self) { group in
-                            group.addTask { await vm.reload() }
-                            group.addTask {
-                                // Sequential: both sync funcs mutate the same CW store across
-                                // await points, so running them concurrently could clobber items.
-                                await ContinueWatchingManager.shared.syncWithAniList()
-                                await ContinueWatchingManager.shared.syncWithMAL()
-                            }
-                        }
                     }
                     .coordinateSpace(name: "homeScroll")
                     .ignoresSafeArea(edges: .top)
@@ -113,7 +120,11 @@ struct HomeView: View {
 
 private struct FeaturedCarousel: View {
     let items: [Media]
+    var isRefreshing: Bool = false
+    var onRefresh: (() async -> Void)? = nil
+
     @State private var selectedTab = 1000
+    @State private var hasTriggeredThreshold = false
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var realItems: [Media] { items.prefix(8).map { $0 } }
@@ -157,8 +168,10 @@ private struct FeaturedCarousel: View {
                 let stretchAmount = isPullingDown ? min(minY * 0.45, maxStretch) : 0
                 let scale = 1.0 + (stretchAmount / max(baseHeight, 1))
 
+                let threshold: CGFloat = 70
+                let progress = min(1.0, max(0.0, (minY - 10) / threshold))
+
                 ZStack(alignment: .bottom) {
-                    // Cards and Poster visual layer (stretches with GPU transform, keeping TabView layout fixed)
                     ZStack(alignment: .top) {
                         if isIPad, !displayItems.isEmpty {
                             TVDBPosterImage(media: displayItems[currentIndex], type: .fanart)
@@ -169,7 +182,7 @@ private struct FeaturedCarousel: View {
                             ForEach(0..<2000, id: \.self) { index in
                                 if !displayItems.isEmpty {
                                     FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
-                                        .allowsHitTesting(false)
+                                        .contentShape(Rectangle())
                                         .tag(index)
                                 }
                             }
@@ -181,7 +194,6 @@ private struct FeaturedCarousel: View {
                     .scaleEffect(scale, anchor: .bottom)
                     .offset(y: isPullingDown ? -(minY - stretchAmount) : 0)
 
-                    // Overlay Content (Title Logo, Tags, Synopsis, Button)
                     ZStack(alignment: .bottom) {
                         LinearGradient(
                             stops: [
@@ -201,6 +213,7 @@ private struct FeaturedCarousel: View {
                                 TVDBTitleLogoView(media: currentMedia, maxHeight: 135, maxWidth: 360, alignment: .center)
                                     .id(currentMedia.uniqueId)
                                     .padding(.horizontal, 16)
+                                    .allowsHitTesting(false)
 
                                 if let genres = currentMedia.genres, !genres.isEmpty {
                                     HStack(spacing: 6) {
@@ -214,6 +227,7 @@ private struct FeaturedCarousel: View {
                                                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
                                         }
                                     }
+                                    .allowsHitTesting(false)
                                 }
 
                                 if let desc = currentMedia.plainDescription, !desc.isEmpty {
@@ -223,6 +237,7 @@ private struct FeaturedCarousel: View {
                                         .multilineTextAlignment(.center)
                                         .lineLimit(2)
                                         .padding(.horizontal, 8)
+                                        .allowsHitTesting(false)
                                 }
 
                                 NavigationLink {
@@ -245,6 +260,52 @@ private struct FeaturedCarousel: View {
                     }
                 }
                 .frame(width: geo.size.width, height: baseHeight)
+                .overlay(alignment: .top) {
+                    if isPullingDown || isRefreshing {
+                        let topPadding: CGFloat = 52
+                        let slideOffset = isRefreshing ? (topPadding + 12) : (topPadding + min(minY * 0.42, 36))
+
+                        ZStack {
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                                .frame(width: 36, height: 36)
+                                .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+
+                            if isRefreshing {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .rotationEffect(.degrees(progress >= 1.0 ? 180 : progress * 180))
+                                    .scaleEffect(0.7 + progress * 0.3)
+                                    .opacity(Double(progress))
+                                    .animation(.spring(response: 0.25, dampingFraction: 0.7), value: progress >= 1.0)
+                            }
+                        }
+                        .offset(y: slideOffset)
+                        .opacity(isRefreshing ? 1.0 : Double(progress))
+                        .allowsHitTesting(false)
+                    }
+                }
+                .onChange(of: minY) { newY in
+                    if newY >= threshold && !hasTriggeredThreshold && !isRefreshing {
+                        hasTriggeredThreshold = true
+                        #if os(iOS)
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        #endif
+                    } else if newY < 20 && hasTriggeredThreshold {
+                        hasTriggeredThreshold = false
+                        if let onRefresh, !isRefreshing {
+                            Task {
+                                await onRefresh()
+                            }
+                        }
+                    }
+                }
             }
             .frame(height: baseHeight)
             .background {

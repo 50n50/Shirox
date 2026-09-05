@@ -375,6 +375,7 @@ struct TVDBTitleLogoView: View {
                     .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 1)
             }
         }
+        .allowsHitTesting(false)
         .task(id: media.uniqueId) {
             tvdbLogoURL = immediateLogoURL
             let artwork = await TVDBMappingService.shared.getArtwork(for: media.id, provider: media.provider)
