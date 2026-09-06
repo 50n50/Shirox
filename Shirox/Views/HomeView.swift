@@ -164,8 +164,7 @@ private struct FeaturedCarousel: View {
             GeometryReader { geo in
                 let minY = geo.frame(in: .named("homeScroll")).minY
                 let isPullingDown = minY > 0
-                let maxStretch: CGFloat = 75
-                let stretchAmount = isPullingDown ? min(minY * 0.45, maxStretch) : 0
+                let stretchAmount = isPullingDown ? minY : 0
                 let scale = 1.0 + (stretchAmount / max(baseHeight, 1))
 
                 let threshold: CGFloat = 70
@@ -192,21 +191,9 @@ private struct FeaturedCarousel: View {
                     }
                     .frame(width: geo.size.width, height: baseHeight)
                     .scaleEffect(scale, anchor: .bottom)
-                    .offset(y: isPullingDown ? -(minY - stretchAmount) : 0)
 
                     ZStack(alignment: .bottom) {
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: platformBackground.opacity(0.5), location: 0.38),
-                                .init(color: platformBackground.opacity(0.88), location: 0.68),
-                                .init(color: platformBackground, location: 1.0)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .frame(height: 420)
-                        .allowsHitTesting(false)
+                        CurvedGradientShadow(height: 350, color: platformBackground, style: .prominent)
 
                         if let currentMedia {
                             VStack(spacing: 10) {
@@ -261,6 +248,7 @@ private struct FeaturedCarousel: View {
                 }
                 .frame(width: geo.size.width, height: baseHeight)
                 .overlay(alignment: .top) {
+                    // Minimalistic Pull to Refresh Indicator
                     if isPullingDown || isRefreshing {
                         let topPadding: CGFloat = 52
                         let slideOffset = isRefreshing ? (topPadding + 12) : (topPadding + min(minY * 0.42, 36))
@@ -309,6 +297,7 @@ private struct FeaturedCarousel: View {
             }
             .frame(height: baseHeight)
             .background {
+                // Hidden preloader — triggers image fetch for all items into NSCache
                 ForEach(displayItems.indices, id: \.self) { i in
                     TVDBPosterImage(media: displayItems[i], type: .fanart)
                         .frame(width: 1, height: 1)
@@ -380,11 +369,7 @@ private struct MacFeaturedCarousel: View {
                         .clipped()
 
                         // Gradient overlay
-                        LinearGradient(
-                            colors: [.clear, .black.opacity(0.6), .black.opacity(0.95)],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .frame(width: geo.size.width, height: cardHeight)
+                        CurvedGradientShadow(height: min(cardHeight * 0.65, 240), color: platformBackground, style: .prominent)
 
                         // Cover + text + watch button
                         HStack(alignment: .bottom, spacing: 12) {

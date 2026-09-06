@@ -539,16 +539,7 @@ struct AniListDetailView: View {
                         .frame(height: 420)
                         .shimmer()
 
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: platformBackground.opacity(0.2), location: 0.45),
-                            .init(color: platformBackground, location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 420)
+                    CurvedGradientShadow(height: 350, color: platformBackground, style: .subtle)
 
                     HStack(alignment: .bottom, spacing: 14) {
                         RoundedRectangle(cornerRadius: 12)
@@ -902,16 +893,7 @@ struct AniListDetailView: View {
             .frame(height: 420)
             .mask(alignment: .bottom) { Rectangle().frame(height: 420 + 2000) }
 
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: 0),
-                    .init(color: platformBackground.opacity(0.2), location: 0.45),
-                    .init(color: platformBackground, location: 1.0)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 420)
+            CurvedGradientShadow(height: 350, color: platformBackground, style: .subtle)
 
             HStack(alignment: .bottom, spacing: 14) {
                 TVDBPosterImage(media: media)

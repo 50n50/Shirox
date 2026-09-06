@@ -124,18 +124,35 @@ final class AniListService {
         return result
     }
 
+    private static let mediaFields = """
+      id
+      title { romaji english native }
+      coverImage { large extraLarge }
+      bannerImage
+      averageScore
+      genres
+      description(asHtml: false)
+      relations {
+        edges {
+          relationType
+          node {
+            id
+            title { romaji english native }
+            coverImage { large extraLarge }
+            status
+            type
+            format
+          }
+        }
+      }
+    """
+
     func trending() async throws -> [AniListMedia] {
         let query = """
         query {
           Page(page: 1, perPage: 20) {
             media(type: ANIME, sort: TRENDING_DESC, isAdult: false) {
-              id
-              title { romaji english native }
-              coverImage { large extraLarge }
-              bannerImage
-              averageScore
-              genres
-              description(asHtml: false)
+              \(Self.mediaFields)
             }
           }
         }
@@ -149,13 +166,7 @@ final class AniListService {
         query ($season: MediaSeason, $year: Int) {
           Page(page: 1, perPage: 20) {
             media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-              id
-              title { romaji english native }
-              coverImage { large extraLarge }
-              bannerImage
-              averageScore
-              genres
-              description(asHtml: false)
+              \(Self.mediaFields)
             }
           }
         }
@@ -168,13 +179,7 @@ final class AniListService {
         query {
           Page(page: 1, perPage: 20) {
             media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-              id
-              title { romaji english native }
-              coverImage { large extraLarge }
-              bannerImage
-              averageScore
-              genres
-              description(asHtml: false)
+              \(Self.mediaFields)
             }
           }
         }
@@ -187,13 +192,7 @@ final class AniListService {
         query {
           Page(page: 1, perPage: 20) {
             media(type: ANIME, sort: SCORE_DESC, isAdult: false) {
-              id
-              title { romaji english native }
-              coverImage { large extraLarge }
-              bannerImage
-              averageScore
-              genres
-              description(asHtml: false)
+              \(Self.mediaFields)
             }
           }
         }
@@ -208,13 +207,7 @@ final class AniListService {
             query ($page: Int) {
               Page(page: $page, perPage: 20) {
                 media(type: ANIME, sort: TRENDING_DESC, isAdult: false) {
-                  id
-                  title { romaji english native }
-                  coverImage { large extraLarge }
-                  bannerImage
-                  averageScore
-                  genres
-                  description(asHtml: false)
+                  \(Self.mediaFields)
                 }
               }
             }
@@ -227,13 +220,7 @@ final class AniListService {
             query ($season: MediaSeason, $year: Int, $page: Int) {
               Page(page: $page, perPage: 20) {
                 media(season: $season, seasonYear: $year, type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-                  id
-                  title { romaji english native }
-                  coverImage { large extraLarge }
-                  bannerImage
-                  averageScore
-                  genres
-                  description(asHtml: false)
+                  \(Self.mediaFields)
                 }
               }
             }
@@ -245,13 +232,7 @@ final class AniListService {
             query ($page: Int) {
               Page(page: $page, perPage: 20) {
                 media(type: ANIME, sort: POPULARITY_DESC, isAdult: false) {
-                  id
-                  title { romaji english native }
-                  coverImage { large extraLarge }
-                  bannerImage
-                  averageScore
-                  genres
-                  description(asHtml: false)
+                  \(Self.mediaFields)
                 }
               }
             }
@@ -263,13 +244,7 @@ final class AniListService {
             query ($page: Int) {
               Page(page: $page, perPage: 20) {
                 media(type: ANIME, sort: SCORE_DESC, isAdult: false) {
-                  id
-                  title { romaji english native }
-                  coverImage { large extraLarge }
-                  bannerImage
-                  averageScore
-                  genres
-                  description(asHtml: false)
+                  \(Self.mediaFields)
                 }
               }
             }
@@ -645,13 +620,17 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             if let tid = m.tvdb_id {
                 setTVDBCache(CachedData(tid: tid, season: m.tvdb_season, epOffset: m.tvdb_epoffset,
                                         epOffsetFetched: true,
-                                        posterPath: cached?.posterPath, fanartPath: cached?.fanartPath),
+                                        posterPath: cached?.posterPath, fanartPath: cached?.fanartPath,
+                                        logoPath: cached?.logoPath, textlessPosterPath: cached?.textlessPosterPath),
                              id: id, provider: provider)
                 provider == .mal ? saveMALCache() : saveCache()
                 return (tid, m.tvdb_season)
             }
             // Present in the snapshot but no TVDB id → definitively no TVDB mapping.
-            setTVDBCache(CachedData(tid: -1, season: nil, epOffsetFetched: true), id: id, provider: provider)
+            setTVDBCache(CachedData(tid: -1, season: nil, epOffsetFetched: true,
+                                    posterPath: cached?.posterPath, fanartPath: cached?.fanartPath,
+                                    logoPath: cached?.logoPath, textlessPosterPath: cached?.textlessPosterPath),
+                         id: id, provider: provider)
             provider == .mal ? saveMALCache() : saveCache()
             return nil
         }
@@ -664,11 +643,17 @@ enum BrowseCategory: String, CaseIterable, Hashable {
             struct Mapping: Decodable { let tvdb_id: Int?; let tvdb_season: Int?; let tvdb_epoffset: Int? }
             let results = try JSONDecoder().decode([Mapping].self, from: data)
             if let first = results.first, let tid = first.tvdb_id {
-                setTVDBCache(CachedData(tid: tid, season: first.tvdb_season, epOffset: first.tvdb_epoffset, epOffsetFetched: true), id: id, provider: provider)
+                setTVDBCache(CachedData(tid: tid, season: first.tvdb_season, epOffset: first.tvdb_epoffset, epOffsetFetched: true,
+                                        posterPath: cached?.posterPath, fanartPath: cached?.fanartPath,
+                                        logoPath: cached?.logoPath, textlessPosterPath: cached?.textlessPosterPath),
+                             id: id, provider: provider)
                 provider == .mal ? saveMALCache() : saveCache()
                 return (tid, first.tvdb_season)
             } else {
-                setTVDBCache(CachedData(tid: -1, season: nil, epOffsetFetched: true), id: id, provider: provider)
+                setTVDBCache(CachedData(tid: -1, season: nil, epOffsetFetched: true,
+                                        posterPath: cached?.posterPath, fanartPath: cached?.fanartPath,
+                                        logoPath: cached?.logoPath, textlessPosterPath: cached?.textlessPosterPath),
+                             id: id, provider: provider)
                 provider == .mal ? saveMALCache() : saveCache()
             }
         } catch where (error as? URLError)?.code == .cancelled || error is CancellationError {
@@ -805,28 +790,158 @@ enum BrowseCategory: String, CaseIterable, Hashable {
         return (nil, nil, nil, nil)
     }
 
+    private var parentCache: [Int: Int] = [:]
+
+    /// Resolves the parent anime ID for an anime (e.g. Frieren Season 2 -> Frieren Season 1).
+    func getParentAnimeId(for id: Int, provider: ProviderType = .anilist) async -> Int? {
+        if let cached = parentCache[id] {
+            return cached > 0 ? cached : nil
+        }
+
+        // 1. Check in-memory / bulk TVDB mapping index:
+        // If this entry belongs to a TVDB show with multiple seasons (season > 1 or offset > 0),
+        // find Season 1 (the root parent show) from the mapping index.
+        await loadAllMappings()
+        let index = provider == .mal ? malMappingIndex : anilistMappingIndex
+        if let currentMapping = index[id], let tid = currentMapping.tvdb_id, (currentMapping.tvdb_season ?? 1) > 1 || (currentMapping.tvdb_epoffset ?? 0) > 0 {
+            if let season1 = index.values.first(where: { $0.tvdb_id == tid && $0.tvdb_season == 1 && ($0.tvdb_epoffset == 0 || $0.tvdb_epoffset == nil) }) {
+                let candidateId = provider == .mal ? season1.mal_id : season1.anilist_id
+                if let candidateId, candidateId != id {
+                    parentCache[id] = candidateId
+                    return candidateId
+                }
+            }
+        }
+
+        // 2. Try offline TVDB sibling groups: if this entry belongs to a TVDB show with multiple seasons,
+        // find Season 1 (the root parent show).
+        if let tvdbId = (provider == .mal ? IDMappingService.shared.tvdbId(forMALId: id) : IDMappingService.shared.tvdbId(forAnilistId: id)) {
+            let sibs = IDMappingService.shared.siblings(forTvdbId: tvdbId)
+            if let season1 = sibs.first(where: { $0.tvdbSeason == 1 && $0.tvdbEpoffset == 0 }) {
+                let candidateId = provider == .mal ? season1.malID : season1.aniListID
+                if let candidateId, candidateId != id {
+                    parentCache[id] = candidateId
+                    return candidateId
+                }
+            }
+        }
+
+        // 3. Query AniList GraphQL relations lookup
+        if provider == .anilist {
+            if let parentId = await fetchAniListParentId(id: id) {
+                parentCache[id] = parentId
+                return parentId
+            }
+        }
+
+        parentCache[id] = -1
+        return nil
+    }
+
+    private func fetchAniListParentId(id: Int) async -> Int? {
+        guard let detail = try? await AniListService.shared.detail(id: id) else { return nil }
+        let edges = detail.relations?.edges ?? []
+        let animeEdges = edges.filter { $0.node.type == nil || $0.node.type?.uppercased() == "ANIME" }
+        let match = animeEdges.first(where: { $0.relationType == "PARENT" })
+            ?? animeEdges.first(where: { $0.relationType == "PREQUEL" })
+        return match?.node.id
+    }
+
+    /// Recursively looks up parent anime prequels to inherit an image title logo.
+    func resolveParentLogo(for id: Int, provider: ProviderType = .anilist) async -> String? {
+        var currentId = id
+        var visited = Set<Int>([id])
+
+        for _ in 0..<3 {
+            guard let parentId = await getParentAnimeId(for: currentId, provider: provider),
+                  !visited.contains(parentId) else {
+                break
+            }
+            visited.insert(parentId)
+
+            // Fast path: check if parent already has cached logo
+            let cached = getCachedArtwork(for: parentId, provider: provider)
+            if let logo = cached.logo, !logo.isEmpty {
+                return logo
+            }
+
+            // Direct fetch: avoid full getArtwork recursion by fetching TVDB artwork directly
+            guard let mapping = await getTVDBId(for: parentId, provider: provider), mapping.id > 0 else {
+                currentId = parentId
+                continue
+            }
+            let parentArt = await fetchTVDBIdArtwork(tid: mapping.id, targetSeason: mapping.season)
+            if let logo = parentArt.logo, !logo.isEmpty {
+                return logo
+            }
+
+            currentId = parentId
+        }
+        return nil
+    }
+
     func getArtwork(for id: Int, provider: ProviderType = .anilist) async -> (poster: String?, fanart: String?, logo: String?, textlessPoster: String?) {
         if let c = tvdbCache(for: provider)[id], c.posterPath != nil || c.fanartPath != nil || c.logoPath != nil || c.textlessPosterPath != nil {
-            return (formatURL(c.posterPath), formatURL(c.fanartPath), formatURL(c.logoPath), formatURL(c.textlessPosterPath))
+            var logo = c.logoPath
+            if logo == nil || logo?.isEmpty == true {
+                if let parentLogo = await resolveParentLogo(for: id, provider: provider) {
+                    logo = parentLogo
+                    if provider == .mal {
+                        var entry = malCache[id] ?? c
+                        entry.logoPath = parentLogo
+                        malCache[id] = entry
+                        saveMALCache()
+                    } else {
+                        var entry = cache[id] ?? c
+                        entry.logoPath = parentLogo
+                        cache[id] = entry
+                        saveCache()
+                    }
+                }
+            }
+            return (formatURL(c.posterPath), formatURL(c.fanartPath), formatURL(logo), formatURL(c.textlessPosterPath))
         }
         guard let mapping = await getTVDBId(for: id, provider: provider), mapping.id > 0 else {
+            if let parentLogo = await resolveParentLogo(for: id, provider: provider) {
+                if provider == .mal {
+                    var entry = malCache[id] ?? CachedData(tid: -1)
+                    entry.logoPath = parentLogo
+                    malCache[id] = entry
+                    saveMALCache()
+                } else {
+                    var entry = cache[id] ?? CachedData(tid: -1)
+                    entry.logoPath = parentLogo
+                    cache[id] = entry
+                    saveCache()
+                }
+                return (nil, nil, formatURL(parentLogo), nil)
+            }
             return (nil, nil, nil, nil)
         }
         let artwork = await fetchTVDBIdArtwork(tid: mapping.id, targetSeason: mapping.season)
+        var resolvedLogo = artwork.logo
+        if resolvedLogo == nil || resolvedLogo?.isEmpty == true {
+            resolvedLogo = await resolveParentLogo(for: id, provider: provider)
+        }
+
         if provider == .mal {
-            malCache[id]?.posterPath = artwork.poster
-            malCache[id]?.fanartPath = artwork.fanart
-            malCache[id]?.logoPath = artwork.logo
-            malCache[id]?.textlessPosterPath = artwork.textlessPoster
+            var entry = malCache[id] ?? CachedData(tid: mapping.id, season: mapping.season)
+            entry.posterPath = artwork.poster
+            entry.fanartPath = artwork.fanart
+            entry.logoPath = resolvedLogo
+            entry.textlessPosterPath = artwork.textlessPoster
+            malCache[id] = entry
             saveMALCache()
         } else {
-            cache[id]?.posterPath = artwork.poster
-            cache[id]?.fanartPath = artwork.fanart
-            cache[id]?.logoPath = artwork.logo
-            cache[id]?.textlessPosterPath = artwork.textlessPoster
+            var entry = cache[id] ?? CachedData(tid: mapping.id, season: mapping.season)
+            entry.posterPath = artwork.poster
+            entry.fanartPath = artwork.fanart
+            entry.logoPath = resolvedLogo
+            entry.textlessPosterPath = artwork.textlessPoster
+            cache[id] = entry
             saveCache()
         }
-        return (formatURL(artwork.poster), formatURL(artwork.fanart), formatURL(artwork.logo), formatURL(artwork.textlessPoster))
+        return (formatURL(artwork.poster), formatURL(artwork.fanart), formatURL(resolvedLogo), formatURL(artwork.textlessPoster))
     }
 
 
@@ -1158,13 +1273,18 @@ enum BrowseCategory: String, CaseIterable, Hashable {
                 textlessPoster = poster
             }
 
-            // Logo: Strict priority on ClearLogo (23, 14), fallback to ClearArt (22, 24, 25) only if no ClearLogo exists
-            let clearLogoArtworks = artworks.filter { $0.type == 23 || $0.type == 14 }
+            // Logo: Strict priority on ClearLogo (23, 14), fallback to ClearArt (22, 24, 25) only if no ClearLogo exists.
+            // Check season-specific logos first, then fall back to series logos.
+            let seasonLogos = seasonArtworks.filter { $0.type == 23 || $0.type == 14 }
+            let seriesLogos = artworks.filter { $0.type == 23 || $0.type == 14 }
+            let clearLogoArtworks = !seasonLogos.isEmpty ? seasonLogos : seriesLogos
             let englishClearLogo = clearLogoArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
             let anyClearLogo = clearLogoArtworks.sorted(by: bySizeOrScore).first?.image
             let clearLogo = englishClearLogo ?? anyClearLogo
 
-            let clearArtArtworks = artworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
+            let seasonArt = seasonArtworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
+            let seriesArt = artworks.filter { $0.type == 22 || $0.type == 24 || $0.type == 25 }
+            let clearArtArtworks = !seasonArt.isEmpty ? seasonArt : seriesArt
             let englishClearArt = clearArtArtworks.filter { $0.language == "eng" || $0.language == "en" }.sorted(by: bySizeOrScore).first?.image
             let anyClearArt = clearArtArtworks.sorted(by: bySizeOrScore).first?.image
             let clearArt = englishClearArt ?? anyClearArt

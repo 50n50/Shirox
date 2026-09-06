@@ -353,7 +353,13 @@ struct TVDBTitleLogoView: View {
     @State private var tvdbLogoURL: String?
 
     private var immediateLogoURL: String? {
-        TVDBMappingService.shared.getCachedArtwork(for: media.id, provider: media.provider).logo
+        let direct = TVDBMappingService.shared.getCachedArtwork(for: media.id, provider: media.provider).logo
+        if let direct, !direct.isEmpty { return direct }
+        if let parentId = media.parentAnimeId {
+            let parentCached = TVDBMappingService.shared.getCachedArtwork(for: parentId, provider: media.provider).logo
+            if let parentCached, !parentCached.isEmpty { return parentCached }
+        }
+        return nil
     }
 
     private var resolvedURL: String? {
@@ -381,6 +387,19 @@ struct TVDBTitleLogoView: View {
             let artwork = await TVDBMappingService.shared.getArtwork(for: media.id, provider: media.provider)
             if let logo = artwork.logo, !logo.isEmpty {
                 tvdbLogoURL = logo
+            } else {
+                let parentId: Int?
+                if let directParent = media.parentAnimeId {
+                    parentId = directParent
+                } else {
+                    parentId = await TVDBMappingService.shared.getParentAnimeId(for: media.id, provider: media.provider)
+                }
+                if let parentId {
+                    let parentArt = await TVDBMappingService.shared.getArtwork(for: parentId, provider: media.provider)
+                    if let parentLogo = parentArt.logo, !parentLogo.isEmpty {
+                        tvdbLogoURL = parentLogo
+                    }
+                }
             }
         }
     }
