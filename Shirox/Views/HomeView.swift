@@ -111,13 +111,28 @@ struct HomeView: View {
             .navigationTitle("")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHiddenCompat()
             .toolbarBackgroundHidden()
             #endif
+            #if os(iOS)
+            .overlay(alignment: .topLeading) {
+                Button { showUpcoming = true } label: {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 20 : 54)
+                .padding(.leading, 20)
+            }
+            .overlay(alignment: .topTrailing) {
+                ProviderMenuButton()
+                    .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 20 : 54)
+                    .padding(.trailing, 20)
+            }
+            #else
             .toolbar {
-                // One control per side. Sharing `.primaryAction` between two items is what
-                // pushed the provider switcher out — the platform may collapse or drop one —
-                // so the calendar takes the leading edge and the switcher keeps the trailing
-                // one it has always had, untouched.
                 ToolbarItem(placement: Self.leadingPlacement) {
                     Button { showUpcoming = true } label: {
                         Label("Upcoming", systemImage: "calendar")
@@ -127,6 +142,7 @@ struct HomeView: View {
                     ProviderMenuButton()
                 }
             }
+            #endif
             .sheet(isPresented: $showUpcoming) { UpcomingCalendarView() }
             // Outside the ScrollView: the hidden NavigationLink that performs the push.
             .continueWatchingNavigation($cwNavTarget)
@@ -139,6 +155,14 @@ struct HomeView: View {
         .task { await vm.load() }
         .onAppear {
             #if os(iOS)
+            let navAppearance = UINavigationBarAppearance()
+            navAppearance.configureWithTransparentBackground()
+            navAppearance.shadowColor = .clear
+            navAppearance.shadowImage = UIImage()
+            UINavigationBar.appearance().standardAppearance = navAppearance
+            UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+            UINavigationBar.appearance().compactAppearance = navAppearance
+
             PlayerPresenter.shared.resetToAppOrientation()
             // Reclaim local-file copies left by cancelled picks or finished/removed items.
             ContinueWatchingManager.shared.pruneOrphanedLocalImports()
@@ -178,15 +202,15 @@ private struct FeaturedCarousel: View {
 
     #if os(iOS) && !targetEnvironment(macCatalyst)
     private var carouselHeight: CGFloat {
-        let isIPad = sizeClass == .regular
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad || sizeClass == .regular
         let screen = UIScreen.main.bounds
-        return isIPad ? (screen.width * (9.0 / 16.0)) : (screen.height - 140)
+        return isIPad ? (screen.height - 45) : (screen.height - 140)
     }
     #endif
 
     var body: some View {
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        let isIPad = sizeClass == .regular
+        let isIPad = UIDevice.current.userInterfaceIdiom == .pad || sizeClass == .regular
         let displayItems = realItems
         let currentMedia = displayItems.indices.contains(currentIndex) ? displayItems[currentIndex] : nil
         let baseHeight = carouselHeight
@@ -202,24 +226,16 @@ private struct FeaturedCarousel: View {
                 let progress = min(1.0, max(0.0, (minY - 10) / threshold))
 
                 ZStack(alignment: .bottom) {
-                    ZStack(alignment: .top) {
-                        if isIPad, !displayItems.isEmpty {
-                            TVDBPosterImage(media: displayItems[currentIndex], type: .fanart)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-
-                        TabView(selection: $selectedTab) {
-                            ForEach(0..<2000, id: \.self) { index in
-                                if !displayItems.isEmpty {
-                                    FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
-                                        .contentShape(Rectangle())
-                                        .tag(index)
-                                }
+                    TabView(selection: $selectedTab) {
+                        ForEach(0..<2000, id: \.self) { index in
+                            if !displayItems.isEmpty {
+                                FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
+                                    .contentShape(Rectangle())
+                                    .tag(index)
                             }
                         }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(width: geo.size.width, height: baseHeight)
                     }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(width: geo.size.width, height: baseHeight)
                     .scaleEffect(scale, anchor: .bottom)
 
@@ -529,44 +545,9 @@ private struct FeaturedCard: View {
     var body: some View {
         Group {
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            if isWide {
-                // iPad: fanart with horizontal parallax
-                Color.clear
-                    .overlay(
-                        ZStack {
-                            GeometryReader { geo in
-                                let minX = geo.frame(in: .global).minX
-                                let screenW = geo.size.width > 0 ? geo.size.width : 1
-                                let extra: CGFloat = 80
-                                let px = -(extra / 2) - minX * (extra / (2 * screenW))
-                                TVDBPosterImage(media: media, type: .fanart)
-                                    .frame(width: geo.size.width + extra, height: geo.size.height)
-                                    .offset(x: px)
-                                    .clipped()
-                            }
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .clear, location: 0),
-                                    .init(color: .black.opacity(0.4), location: 0.5),
-                                    .init(color: .black.opacity(0.92), location: 1)
-                                ],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // iPhone: portrait with horizontal parallax
-                GeometryReader { geo in
-                    let pageOffset = geo.frame(in: .global).minX
-                    let buffer: CGFloat = 100
-                    TVDBPosterImage(media: media, type: .textlessPoster)
-                        .frame(width: geo.size.width + buffer, height: geo.size.height)
-                        .offset(x: -(buffer / 2) - pageOffset * 0.25)
-                }
+            TVDBPosterImage(media: media, type: isWide ? .fanart : .textlessPoster)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
-            }
             #else
             // macOS: banner background + poster overlay
             Color.clear
@@ -749,5 +730,24 @@ private struct HomePressStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.94 : 1.0)
             .opacity(configuration.isPressed ? 0.88 : 1.0)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Navigation Bar Compatibility
+
+private extension View {
+    @ViewBuilder
+    func navigationBarHiddenCompat() -> some View {
+        #if os(iOS)
+        if #available(iOS 16, *) {
+            self
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationBarHidden(true)
+        } else {
+            self.navigationBarHidden(true)
+        }
+        #else
+        self
+        #endif
     }
 }

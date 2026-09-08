@@ -63,6 +63,14 @@ extension View {
         if #available(iOS 16, macOS 13, *) {
             #if os(macOS)
                 self.toolbarBackground(.hidden, for: .windowToolbar)
+            #elseif os(iOS)
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                    self
+                        .toolbarBackground(.hidden, for: .navigationBar)
+                        .toolbarBackground(.hidden, for: .tabBar)
+                } else {
+                    self.toolbarBackground(.hidden, for: .navigationBar)
+                }
             #else
                 self.toolbarBackground(.hidden, for: .navigationBar)
             #endif
