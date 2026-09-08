@@ -283,6 +283,7 @@ struct MangaDetailView: View {
             }
             .padding(.bottom, 30)
         }
+        .softScrollEdges()
         .coordinateSpace(name: "mangaDetailScroll")
         .ignoresSafeArea(edges: .top)
     }
@@ -411,6 +412,7 @@ struct MangaDetailView: View {
                         isSynopsisExpanded.toggle()
                     }
                 }
+                .copyDescriptionContextMenu(text)
         }
     }
 
@@ -484,12 +486,12 @@ struct MangaDetailView: View {
         HStack(spacing: 10) {
             if anilistAuth.isLoggedIn, mangaAniListID != nil {
                 listButton(
-                    title: existingAniListEntry.map { "\($0.status.displayName) \($0.progress)/\(vm.match?.totalChapters.map(String.init) ?? "?")" } ?? "Add to AniList",
+                    title: existingAniListEntry.map { "\($0.status.displayName(for: .manga)) \($0.progress)/\(vm.match?.totalChapters.map(String.init) ?? "?")" } ?? "Add to AniList",
                     systemImage: "list.bullet.rectangle") { showAniListEdit = true }
             }
             if malAuth.isLoggedIn, mangaMALID != nil {
                 listButton(
-                    title: existingMALEntry.map { "MAL · \($0.status.displayName) \($0.progress)" } ?? "Add to MAL",
+                    title: existingMALEntry.map { "MAL · \($0.status.displayName(for: .manga)) \($0.progress)" } ?? "Add to MAL",
                     systemImage: "list.bullet.rectangle") { showMALEdit = true }
             }
         }
@@ -750,7 +752,7 @@ private struct MangaRelationCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            CachedAsyncImage(urlString: edge.node.coverImage.best ?? "")
+            CachedAsyncImage(urlString: edge.node.coverImage.thumb ?? "")
                 .frame(width: 110, height: 165)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(alignment: .topLeading) {
@@ -909,6 +911,22 @@ private struct MangaChapterRowView: View {
             } else {
                 Button { onMarkRead?() } label: {
                     Label("Mark as Read", systemImage: "checkmark.circle")
+                }
+            }
+            // Mirrors the episode row's menu. A chapter could only be downloaded one at a
+            // time through the small row button or by entering select mode, while the
+            // equivalent for anime was right there on long-press.
+            if let onDownload {
+                Divider()
+                Button { onDownload() } label: {
+                    Label("Download Chapter", systemImage: "arrow.down.circle")
+                }
+                .disabled(downloadState == .completed || downloadState == .downloading || downloadState == .pending)
+            }
+            if let onDeleteDownload, downloadState == .completed {
+                Divider()
+                Button(role: .destructive) { onDeleteDownload() } label: {
+                    Label("Delete Download", systemImage: "trash")
                 }
             }
         }
