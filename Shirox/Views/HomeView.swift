@@ -67,60 +67,54 @@ struct HomeView: View {
                         }
                     }
                 } else {
-                    GeometryReader { geo in
-                        let currentLeading = geo.safeAreaInsets.leading
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 24) {
-                                if !vm.trending.isEmpty {
-                                    FeaturedCarousel(
-                                        items: vm.trending,
-                                        isRefreshing: isRefreshing,
-                                        onRefresh: performRefresh,
-                                        leadingInset: currentLeading
-                                    )
-                                }
-                                Group {
-                                    #if os(iOS)
-                                    if !continueWatching.items.isEmpty {
-                                        ContinueWatchingSection(items: continueWatching.items, navTarget: $cwNavTarget)
-                                    }
-                                    if !mangaProgress.items.isEmpty {
-                                        ContinueReadingSection(items: mangaProgress.items, readerContext: $readerContext)
-                                    }
-                                    #endif
-                                    if !vm.trending.isEmpty {
-                                        AnimeSection(title: "Trending Now",     items: vm.trending, category: .trending)
-                                    }
-                                    if !vm.seasonal.isEmpty {
-                                        AnimeSection(title: "This Season",      items: vm.seasonal, category: .seasonal)
-                                    }
-                                    if !vm.lastSeason.isEmpty {
-                                        AnimeSection(title: "Last Season · Complete", items: vm.lastSeason, category: .lastSeason)
-                                    }
-                                    if !vm.popular.isEmpty {
-                                        AnimeSection(title: "All-Time Popular", items: vm.popular,  category: .popular)
-                                    }
-                                    if !vm.topRated.isEmpty {
-                                        AnimeSection(title: "Top Rated",        items: vm.topRated, category: .topRated)
-                                    }
-                                }
-                                .padding(.leading, currentLeading)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            if !vm.trending.isEmpty {
+                                FeaturedCarousel(
+                                    items: vm.trending,
+                                    isRefreshing: isRefreshing,
+                                    onRefresh: performRefresh,
+                                    leadingInset: leadingInset
+                                )
                             }
-                            Spacer().frame(height: 28)
+                            Group {
+                                #if os(iOS)
+                                if !continueWatching.items.isEmpty {
+                                    ContinueWatchingSection(items: continueWatching.items, navTarget: $cwNavTarget)
+                                }
+                                if !mangaProgress.items.isEmpty {
+                                    ContinueReadingSection(items: mangaProgress.items, readerContext: $readerContext)
+                                }
+                                #endif
+                                if !vm.trending.isEmpty {
+                                    AnimeSection(title: "Trending Now",     items: vm.trending, category: .trending)
+                                }
+                                if !vm.seasonal.isEmpty {
+                                    AnimeSection(title: "This Season",      items: vm.seasonal, category: .seasonal)
+                                }
+                                if !vm.lastSeason.isEmpty {
+                                    AnimeSection(title: "Last Season · Complete", items: vm.lastSeason, category: .lastSeason)
+                                }
+                                if !vm.popular.isEmpty {
+                                    AnimeSection(title: "All-Time Popular", items: vm.popular,  category: .popular)
+                                }
+                                if !vm.topRated.isEmpty {
+                                    AnimeSection(title: "Top Rated",        items: vm.topRated, category: .topRated)
+                                }
+                            }
+                            .padding(.leading, leadingInset)
                         }
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .softScrollEdges()
-                        .coordinateSpace(name: "homeScroll")
-                        // Only the hero is allowed under the status bar — bleeding its banner up
-                        // there is the point of it. Without one, this same modifier slid whatever
-                        // row happened to be first up under the clock, which is what a title row
-                        // overlapping the time looked like. The hero can be absent for ordinary
-                        // reasons: a provider that doesn't fill Trending, or an outage on the
-                        // endpoint behind it.
-                        .ignoresSafeArea(edges: vm.trending.isEmpty ? [] : [.top, .leading])
-                        .onAppear { leadingInset = currentLeading }
-                        .onChange(of: currentLeading) { newInset in leadingInset = newInset }
+                        Spacer().frame(height: 28)
                     }
+                    .softScrollEdges()
+                    .coordinateSpace(name: "homeScroll")
+                    // Only the hero is allowed under the status bar — bleeding its banner up
+                    // there is the point of it. Without one, this same modifier slid whatever
+                    // row happened to be first up under the clock, which is what a title row
+                    // overlapping the time looked like. The hero can be absent for ordinary
+                    // reasons: a provider that doesn't fill Trending, or an outage on the
+                    // endpoint behind it.
+                    .ignoresSafeArea(edges: vm.trending.isEmpty ? [] : [.top, .leading])
                 }
             }
             // `ProviderStatusBanner` existed but was never placed in any view — a provider
@@ -173,6 +167,17 @@ struct HomeView: View {
                 MangaReaderView(context: ctx)
             }
             #endif
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: HomeSafeAreaLeadingKey.self, value: proxy.safeAreaInsets.leading)
+                    .onAppear { leadingInset = proxy.safeAreaInsets.leading }
+                    .onChange(of: proxy.safeAreaInsets.leading) { newInset in leadingInset = newInset }
+            }
+        }
+        .onPreferenceChange(HomeSafeAreaLeadingKey.self) { newInset in
+            leadingInset = newInset
         }
         .task { await vm.load() }
         .onAppear {
@@ -755,6 +760,13 @@ private struct AnimeSection: View {
             }
         }
     }
+}
+
+// MARK: - Safe Area Leading Preference
+
+private struct HomeSafeAreaLeadingKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // MARK: - Carousel Stretch Preference
