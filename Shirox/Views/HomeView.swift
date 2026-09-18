@@ -31,6 +31,7 @@ struct HomeView: View {
     }
 
     @State private var isRefreshing = false
+    @State private var leadingInset: CGFloat = 0
 
     private func performRefresh() async {
         guard !isRefreshing else { return }
@@ -66,46 +67,60 @@ struct HomeView: View {
                         }
                     }
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            if !vm.trending.isEmpty {
-                                FeaturedCarousel(items: vm.trending, isRefreshing: isRefreshing, onRefresh: performRefresh)
+                    GeometryReader { geo in
+                        let currentLeading = geo.safeAreaInsets.leading
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 24) {
+                                if !vm.trending.isEmpty {
+                                    FeaturedCarousel(
+                                        items: vm.trending,
+                                        isRefreshing: isRefreshing,
+                                        onRefresh: performRefresh,
+                                        leadingInset: currentLeading
+                                    )
+                                }
+                                Group {
+                                    #if os(iOS)
+                                    if !continueWatching.items.isEmpty {
+                                        ContinueWatchingSection(items: continueWatching.items, navTarget: $cwNavTarget)
+                                    }
+                                    if !mangaProgress.items.isEmpty {
+                                        ContinueReadingSection(items: mangaProgress.items, readerContext: $readerContext)
+                                    }
+                                    #endif
+                                    if !vm.trending.isEmpty {
+                                        AnimeSection(title: "Trending Now",     items: vm.trending, category: .trending)
+                                    }
+                                    if !vm.seasonal.isEmpty {
+                                        AnimeSection(title: "This Season",      items: vm.seasonal, category: .seasonal)
+                                    }
+                                    if !vm.lastSeason.isEmpty {
+                                        AnimeSection(title: "Last Season · Complete", items: vm.lastSeason, category: .lastSeason)
+                                    }
+                                    if !vm.popular.isEmpty {
+                                        AnimeSection(title: "All-Time Popular", items: vm.popular,  category: .popular)
+                                    }
+                                    if !vm.topRated.isEmpty {
+                                        AnimeSection(title: "Top Rated",        items: vm.topRated, category: .topRated)
+                                    }
+                                }
+                                .padding(.leading, currentLeading)
                             }
-                            #if os(iOS)
-                            if !continueWatching.items.isEmpty {
-                                ContinueWatchingSection(items: continueWatching.items, navTarget: $cwNavTarget)
-                            }
-                            if !mangaProgress.items.isEmpty {
-                                ContinueReadingSection(items: mangaProgress.items, readerContext: $readerContext)
-                            }
-                            #endif
-                            if !vm.trending.isEmpty {
-                                AnimeSection(title: "Trending Now",     items: vm.trending, category: .trending)
-                            }
-                            if !vm.seasonal.isEmpty {
-                                AnimeSection(title: "This Season",      items: vm.seasonal, category: .seasonal)
-                            }
-                            if !vm.lastSeason.isEmpty {
-                                AnimeSection(title: "Last Season · Complete", items: vm.lastSeason, category: .lastSeason)
-                            }
-                            if !vm.popular.isEmpty {
-                                AnimeSection(title: "All-Time Popular", items: vm.popular,  category: .popular)
-                            }
-                            if !vm.topRated.isEmpty {
-                                AnimeSection(title: "Top Rated",        items: vm.topRated, category: .topRated)
-                            }
+                            Spacer().frame(height: 28)
                         }
-                        Spacer().frame(height: 28)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .softScrollEdges()
+                        .coordinateSpace(name: "homeScroll")
+                        // Only the hero is allowed under the status bar — bleeding its banner up
+                        // there is the point of it. Without one, this same modifier slid whatever
+                        // row happened to be first up under the clock, which is what a title row
+                        // overlapping the time looked like. The hero can be absent for ordinary
+                        // reasons: a provider that doesn't fill Trending, or an outage on the
+                        // endpoint behind it.
+                        .ignoresSafeArea(edges: vm.trending.isEmpty ? [] : [.top, .leading])
+                        .onAppear { leadingInset = currentLeading }
+                        .onChange(of: currentLeading) { newInset in leadingInset = newInset }
                     }
-                    .softScrollEdges()
-                    .coordinateSpace(name: "homeScroll")
-                    // Only the hero is allowed under the status bar — bleeding its banner up
-                    // there is the point of it. Without one, this same modifier slid whatever
-                    // row happened to be first up under the clock, which is what a title row
-                    // overlapping the time looked like. The hero can be absent for ordinary
-                    // reasons: a provider that doesn't fill Trending, or an outage on the
-                    // endpoint behind it.
-                    .ignoresSafeArea(edges: vm.trending.isEmpty ? [] : .top)
                 }
             }
             // `ProviderStatusBanner` existed but was never placed in any view — a provider
@@ -131,7 +146,7 @@ struct HomeView: View {
                         .background(.ultraThinMaterial, in: Circle())
                 }
                 .padding(.top, UIDevice.current.userInterfaceIdiom == .pad ? 20 : 54)
-                .padding(.leading, 20)
+                .padding(.leading, leadingInset + 20)
             }
             .overlay(alignment: .topTrailing) {
                 ProviderMenuButton()
@@ -184,6 +199,7 @@ private struct FeaturedCarousel: View {
     let items: [Media]
     var isRefreshing: Bool = false
     var onRefresh: (() async -> Void)? = nil
+    var leadingInset: CGFloat = 0
 
     @State private var selectedTab = 1000
     @State private var hasTriggeredThreshold = false
@@ -305,6 +321,7 @@ private struct FeaturedCarousel: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, 20)
+                            .padding(.leading, leadingInset)
                             .padding(.bottom, isIPad ? 65 : 18)
                         }
                     }
@@ -337,7 +354,7 @@ private struct FeaturedCarousel: View {
                                     .animation(.spring(response: 0.25, dampingFraction: 0.7), value: progress >= 1.0)
                             }
                         }
-                        .offset(y: slideOffset)
+                        .offset(x: leadingInset / 2, y: slideOffset)
                         .opacity(isRefreshing ? 1.0 : Double(progress))
                         .allowsHitTesting(false)
                     }
@@ -379,6 +396,7 @@ private struct FeaturedCarousel: View {
 
             PageIndicator(numberOfPages: displayCount, currentPage: currentIndex)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.leading, leadingInset)
                 .padding(.vertical, 10)
         }
         .onAppear {
