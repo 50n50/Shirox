@@ -89,6 +89,30 @@ extension View {
     }
 }
 
+// MARK: - Safe Area Leading Preference Key
+
+struct SafeAreaLeadingKey: PreferenceKey {
+    nonisolated(unsafe) static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+extension View {
+    func observeSafeAreaLeading(_ leadingInset: Binding<CGFloat>) -> some View {
+        self
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: SafeAreaLeadingKey.self, value: proxy.safeAreaInsets.leading)
+                        .onAppear { leadingInset.wrappedValue = proxy.safeAreaInsets.leading }
+                        .onChange(of: proxy.safeAreaInsets.leading) { newInset in leadingInset.wrappedValue = newInset }
+                }
+            }
+            .onPreferenceChange(SafeAreaLeadingKey.self) { newInset in
+                leadingInset.wrappedValue = newInset
+            }
+    }
+}
+
 extension View {
     @ViewBuilder
     func navigationSplitViewColumnWidthIfAvailable(_ width: CGFloat) -> some View {

@@ -106,7 +106,8 @@ struct HomeView: View {
                         }
                         Spacer().frame(height: 28)
                     }
-                    .softScrollEdges()
+                    .softScrollEdges(vm.trending.isEmpty ? .all : [.bottom, .leading, .trailing])
+                    .hideScrollEdgeEffect(vm.trending.isEmpty ? [] : .top)
                     .coordinateSpace(name: "homeScroll")
                     // Only the hero is allowed under the status bar — bleeding its banner up
                     // there is the point of it. Without one, this same modifier slid whatever
@@ -168,17 +169,8 @@ struct HomeView: View {
             }
             #endif
         }
-        .background {
-            GeometryReader { proxy in
-                Color.clear
-                    .preference(key: HomeSafeAreaLeadingKey.self, value: proxy.safeAreaInsets.leading)
-                    .onAppear { leadingInset = proxy.safeAreaInsets.leading }
-                    .onChange(of: proxy.safeAreaInsets.leading) { newInset in leadingInset = newInset }
-            }
-        }
-        .onPreferenceChange(HomeSafeAreaLeadingKey.self) { newInset in
-            leadingInset = newInset
-        }
+        .toolbarBackgroundHidden()
+        .observeSafeAreaLeading($leadingInset)
         .task { await vm.load() }
         .onAppear {
             #if os(iOS)
@@ -762,19 +754,6 @@ private struct AnimeSection: View {
     }
 }
 
-// MARK: - Safe Area Leading Preference
-
-private struct HomeSafeAreaLeadingKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-// MARK: - Carousel Stretch Preference
-
-private struct CarouselStretchKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
 
 // MARK: - Press Style
 

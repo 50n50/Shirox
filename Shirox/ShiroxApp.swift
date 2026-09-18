@@ -332,6 +332,7 @@ private struct RootTabView: View {
                     }
                 }
                 .tabViewStyle(.sidebarAdaptable)
+                .toolbarBackgroundHidden()
                 .tint(.primary)
                 #endif
             } else {
