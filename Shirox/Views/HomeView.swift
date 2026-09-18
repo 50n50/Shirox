@@ -225,26 +225,35 @@ private struct FeaturedCarousel: View {
         VStack(spacing: 0) {
             GeometryReader { geo in
                 let minY = geo.frame(in: .named("homeScroll")).minY
-                let isPullingDown = minY > 0
-                let stretchAmount = isPullingDown ? minY : 0
-                let scale = 1.0 + (stretchAmount / max(baseHeight, 1))
+                let isPullingDown = minY > 4
+                let stretchAmount = isPullingDown ? (minY - 4) : 0
+                let scale = isPullingDown ? (1.0 + (stretchAmount / max(baseHeight, 1))) : 1.0
 
                 let threshold: CGFloat = 70
                 let progress = min(1.0, max(0.0, (minY - 10) / threshold))
+
+                let isWideCard = isIPad && geo.size.width > baseHeight
 
                 ZStack(alignment: .bottom) {
                     TabView(selection: $selectedTab) {
                         ForEach(0..<2000, id: \.self) { index in
                             if !displayItems.isEmpty {
-                                FeaturedCard(media: displayItems[index % displayCount], isWide: isIPad)
-                                    .contentShape(Rectangle())
-                                    .tag(index)
+                                FeaturedCard(
+                                    media: displayItems[index % displayCount],
+                                    isWide: isWideCard,
+                                    width: geo.size.width,
+                                    height: baseHeight
+                                )
+                                .frame(width: geo.size.width, height: baseHeight)
+                                .clipped()
+                                .tag(index)
                             }
                         }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(width: geo.size.width, height: baseHeight)
-                    .scaleEffect(scale, anchor: .bottom)
+                    .clipped()
+                    .scaleEffect(isPullingDown ? scale : 1.0, anchor: .bottom)
 
                     ZStack(alignment: .bottom) {
                         CurvedGradientShadow(height: 350, color: platformBackground, style: .prominent)
@@ -296,7 +305,7 @@ private struct FeaturedCarousel: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 18)
+                            .padding(.bottom, isIPad ? 65 : 18)
                         }
                     }
                 }
@@ -540,6 +549,8 @@ private struct PageIndicator: View {
 private struct FeaturedCard: View {
     let media: Media
     var isWide: Bool = false
+    var width: CGFloat? = nil
+    var height: CGFloat? = nil
 
     private var aspectRatio: CGFloat {
         #if os(iOS) && !targetEnvironment(macCatalyst)
@@ -552,9 +563,15 @@ private struct FeaturedCard: View {
     var body: some View {
         Group {
             #if os(iOS) && !targetEnvironment(macCatalyst)
-            TVDBPosterImage(media: media, type: isWide ? .fanart : .textlessPoster)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Color.clear
+                .frame(width: width, height: height)
+                .overlay {
+                    TVDBPosterImage(media: media, type: isWide ? .fanart : .textlessPoster)
+                        .frame(width: width, height: height)
+                        .clipped()
+                }
                 .clipped()
+                .contentShape(Rectangle())
             #else
             // macOS: banner background + poster overlay
             Color.clear
