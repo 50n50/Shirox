@@ -151,6 +151,7 @@ struct DetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundHidden()
+        .scrollAwareNavTitle(item.title)
         .tint(.primary)
         .toolbar { detailToolbar }
         #endif
@@ -908,6 +909,7 @@ struct DetailView: View {
                     Text(item.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(3)
+                        .heroTitleAnchor(in: "detailScroll")
                         .copyTitleContextMenu(item.title)
 
                     // Module chip

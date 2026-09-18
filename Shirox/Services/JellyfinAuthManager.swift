@@ -34,6 +34,10 @@ final class JellyfinAuthManager: ObservableObject {
     let deviceId: String
 
     private init() {
+        // See `FreshInstallKeychainPurge`. This one already needed a UserDefaults-backed server
+        // URL alongside the token, so a reinstall didn't show it as signed in — but the dead
+        // token was still sitting in the Keychain, and dropping it costs nothing.
+        FreshInstallKeychainPurge.runIfNeeded()
         if let existing = UserDefaults.standard.string(forKey: Keys.deviceId) {
             deviceId = existing
         } else {
@@ -53,6 +57,26 @@ final class JellyfinAuthManager: ObservableObject {
     }
     var accessToken: String? { JellyfinKeychain.read(Keys.tokenAccount) }
     var userId: String? { JellyfinKeychain.read(Keys.userIdAccount) }
+
+    // MARK: - Backup Restore
+
+    /// Writes a backed-up Jellyfin session into the Keychain and UserDefaults and refreshes
+    /// the published state. `deviceId` is deliberately not restored: it identifies *this*
+    /// device in the server's session list, so each device keeps the one it generated.
+    func restoreAccount(token: String?, userId: String?, serverURL: String?, serverName: String?) {
+        if let serverURL, !serverURL.isEmpty {
+            UserDefaults.standard.set(serverURL, forKey: Keys.serverURL)
+        }
+        if let serverName {
+            UserDefaults.standard.set(serverName, forKey: Keys.serverName)
+            self.serverName = serverName
+        }
+        if let token, !token.isEmpty { JellyfinKeychain.save(token, account: Keys.tokenAccount) }
+        if let userId, !userId.isEmpty { JellyfinKeychain.save(userId, account: Keys.userIdAccount) }
+
+        isAuthenticated = JellyfinKeychain.read(Keys.tokenAccount) != nil
+            && UserDefaults.standard.string(forKey: Keys.serverURL) != nil
+    }
 
     static var appVersion: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"

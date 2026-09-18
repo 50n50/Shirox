@@ -20,6 +20,21 @@ final class AniListAuthManager: NSObject, ObservableObject {
     }()
     @Published var unreadNotificationCount: Int = 0
 
+    /// Set when AniList refuses the stored token (400 + "Invalid token" — see
+    /// `AniListService.isTokenRejection`). The token is deliberately *kept*: this app cannot
+    /// tell a revoked token from AniList's auth layer failing good ones during one of its own
+    /// stability incidents, so it surfaces a prompt rather than destroying a session that may
+    /// still be fine. Cleared by the next request AniList accepts, and by `logout()`.
+    @Published var needsReauthentication = false
+
+    /// `userId` alone isn't proof of a live session: it's persisted in UserDefaults while the
+    /// token lives in Keychain, and the two can desync — a token revoked, cleared, or lost
+    /// without going through `logout()` leaves `userId` still set. Every call site that uses
+    /// the id to fire an authenticated request should read this instead of `userId` directly,
+    /// so a stale id already on disk can't fire a request with no token to back it, which is
+    /// what turned into a bare "AniList 400" for a signed-out user.
+    var authenticatedUserId: Int? { accessToken != nil ? userId : nil }
+
     // From https://anilist.co/settings/developer — Redirect URI: shirox://auth
     private let clientId = "38624"
     private let keychainKey = "anilist_access_token"
@@ -28,6 +43,9 @@ final class AniListAuthManager: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        // Before `accessToken` is read for the first time: a token left in the Keychain by a
+        // previous install would otherwise be taken for a live session nobody signed into.
+        FreshInstallKeychainPurge.runIfNeeded()
         isLoggedIn = accessToken != nil
         if accessToken != nil {
             Task { await fetchViewer() }
@@ -74,6 +92,28 @@ final class AniListAuthManager: NSObject, ObservableObject {
             kSecAttrAccount: keychainKey
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    // MARK: - Backup Restore
+
+    /// Writes a backed-up AniList session into the Keychain and refreshes the published
+    /// login state. A restored token may already be expired or revoked; that surfaces
+    /// through the normal auth-failure handling on the next request, so nothing is
+    /// validated against the network here.
+    func restoreAccount(token: String?, userId restoredUserId: Int?, scoreFormat: String?) {
+        if let token, !token.isEmpty {
+            saveToken(token)
+            isLoggedIn = true
+        }
+        if let restoredUserId {
+            userId = restoredUserId
+            UserDefaults.standard.set(restoredUserId, forKey: "anilist_user_id")
+        }
+        if let scoreFormat, let format = ScoreFormat(rawValue: scoreFormat) {
+            self.scoreFormat = format
+            UserDefaults.standard.set(scoreFormat, forKey: "anilist_score_format")
+        }
+        if isLoggedIn { Task { await fetchViewer() } }
     }
 
     // MARK: - OAuth
@@ -127,10 +167,27 @@ final class AniListAuthManager: NSObject, ObservableObject {
         Task { await fetchViewer() }
     }
 
+    /// AniList refused the token. Records it for the UI to prompt on, without clearing the
+    /// session — a refused token and a broken auth backend look identical from here, and only
+    /// one of them is the user's to fix.
+    func noteTokenRejected() {
+        guard !needsReauthentication else { return }
+        Logger.shared.log("[AniList] token refused — session needs re-authentication (token kept)", type: "Error")
+        needsReauthentication = true
+    }
+
+    /// AniList accepted a request again, so whatever refused the token has passed.
+    func noteTokenAccepted() {
+        guard needsReauthentication else { return }
+        Logger.shared.log("[AniList] token accepted again — clearing re-authentication prompt", type: "Info")
+        needsReauthentication = false
+    }
+
     func logout() {
         Logger.shared.log("[AniList] logout() — token cleared", type: "Info")
         deleteToken()
         isLoggedIn = false
+        needsReauthentication = false
         username = nil
         avatarURL = nil
         userId = nil
@@ -143,8 +200,12 @@ final class AniListAuthManager: NSObject, ObservableObject {
 
     // MARK: - Viewer
 
-    func fetchViewer() async {
-        guard let token = accessToken else { return }
+    /// Resolves the signed-in user. Returns whether `authenticatedUserId` is now set — callers
+    /// that need the id have to tell a real auth failure apart from AniList simply being
+    /// unreachable, and this never throws either way (a blip must not drop the session).
+    @discardableResult
+    func fetchViewer() async -> Bool {
+        guard let token = accessToken else { return false }
         let query = """
         query {
           Viewer {
@@ -156,7 +217,7 @@ final class AniListAuthManager: NSObject, ObservableObject {
           }
         }
         """
-        guard let url = URL(string: "https://graphql.anilist.co") else { return }
+        guard let url = URL(string: "https://graphql.anilist.co") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -164,24 +225,41 @@ final class AniListAuthManager: NSObject, ObservableObject {
         let body: [String: Any] = ["query": query]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        // Shared with the content, library and social call sites — see AniListThrottle.
+        await AniListThrottle.shared.waitForTurn()
         guard let (data, response) = try? await URLSession.shared.data(for: request) else {
             // Network error (no response) — transient, keep the session.
             Logger.shared.log("[AniList] fetchViewer network error — keeping session", type: "Network")
-            return
+            return false
         }
         if let http = response as? HTTPURLResponse {
             switch http.statusCode {
             case 200:
-                break
+                await AniListThrottle.shared.reportSuccess()
+                noteTokenAccepted()
             case 401:
-                // Genuine auth failure — token rejected.
+                // Genuine auth failure — token rejected. Kept for completeness; AniList
+                // rejects tokens with a 400 in practice, handled below.
                 Logger.shared.log("[AniList] fetchViewer 401 — logging out", type: "Error")
                 logout()
-                return
+                return false
             default:
                 // 429 / 5xx / anything else — transient. Do NOT clear the token.
+                if http.statusCode == 429 || http.statusCode == 403 {
+                    let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
+                    await AniListThrottle.shared.reportRateLimited(retryAfter: retryAfter)
+                }
+                // The one non-200 that isn't transient: AniList saying it won't accept this
+                // token. Without this the id stayed nil and every authenticated screen went on
+                // re-sending the refused token, each reporting a bare "HTTP error 400".
+                if AniListService.isTokenRejection(
+                    status: http.statusCode,
+                    message: AniListService.graphQLErrorMessage(in: data)) {
+                    noteTokenRejected()
+                    return false
+                }
                 Logger.shared.log("[AniList] fetchViewer HTTP \(http.statusCode) — keeping session", type: "Network")
-                return
+                return false
             }
         }
 
@@ -222,6 +300,7 @@ final class AniListAuthManager: NSObject, ObservableObject {
             // invalid — only a real 401 is. Keep the session and try again next launch.
             Logger.shared.log("[AniList] fetchViewer: 200 but no Viewer in response — keeping session", type: "Network")
         }
+        return authenticatedUserId != nil
     }
 
     /// Lightweight refresh of just the unread-notification count. Keeps the existing value
@@ -236,8 +315,22 @@ final class AniListAuthManager: NSObject, ObservableObject {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["query": query])
 
+        await AniListThrottle.shared.waitForTurn()
         guard let (data, response) = try? await URLSession.shared.data(for: request) else { return }
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 { return }
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            if http.statusCode == 429 || http.statusCode == 403 {
+                let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
+                await AniListThrottle.shared.reportRateLimited(retryAfter: retryAfter)
+            }
+            if AniListService.isTokenRejection(
+                status: http.statusCode,
+                message: AniListService.graphQLErrorMessage(in: data)) {
+                noteTokenRejected()
+            }
+            return
+        }
+        await AniListThrottle.shared.reportSuccess()
+        noteTokenAccepted()
 
         struct CountResponse: Decodable {
             struct ResponseData: Decodable { let Viewer: Viewer }
